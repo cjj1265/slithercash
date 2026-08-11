@@ -1,0 +1,14 @@
+{
+  "name": "slithercash-server",
+  "version": "0.1.0",
+  "description": "Authoritative multiplayer server for SlitherCash",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test": "node test-client.js && node test-multi.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {}
+}
