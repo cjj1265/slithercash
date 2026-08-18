@@ -20,7 +20,10 @@ const CFG = {
   BASE_RADIUS: 6.5,
   MIN_LEN: 6,
   GROW_PER_ORB: 3.2,
-  NUM_BOTS: 50,
+  // Real players only by default. Set the NUM_BOTS env var on your host (e.g.
+  // Render's dashboard) to a number > 0 if you ever want the world seeded
+  // with AI-controlled snakes again — no code change needed either way.
+  NUM_BOTS: Number(process.env.NUM_BOTS) || 0,
   ORB_CAP: 700,
   LEN_PER_DOLLAR: 8,
   DEFAULT_BUYIN: 5,
