@@ -1,0 +1,1852 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>SlitherCash</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg-void:#0a0d0c;
+    --charcoal:#12181a;
+    --charcoal-2:#1a2224;
+    --panel-border:rgba(255,255,255,0.07);
+    --hairline:rgba(255,255,255,0.06);
+    --green-deep:#123024;
+    --green-mid:#2c5843;
+    --green-glow:rgba(63,140,104,0.35);
+    --gray:#9fa8a2;
+    --white-muted:#eaeee9;
+    --dim:#7c8a82;
+    --gold:#f0c24a;
+    --gold-bright:#ffe27a;
+    --gold-deep:#a97c22;
+    --ruby:#e6465c;
+    --ruby-deep:#7a2230;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{
+    width:100%; height:100%; overflow:hidden; background:var(--bg-void);
+    font-family:'Space Grotesk',sans-serif; color:var(--white-muted);
+    -webkit-user-select:none; user-select:none;
+  }
+  #menuBgCanvas{ position:fixed; inset:0; z-index:1; pointer-events:none; }
+  #gameCanvas{ position:absolute; inset:0; display:block; touch-action:none; z-index:2; }
+  #minimap{
+    position:absolute; right:16px; bottom:16px; border-radius:50%; z-index:5;
+    background:rgba(10,14,12,0.5); border:1px solid rgba(255,255,255,0.1);
+    box-shadow:0 8px 22px rgba(0,0,0,0.45), inset 0 0 20px rgba(0,0,0,0.55);
+  }
+
+  /* ---------- HUD ---------- */
+  #hud{ position:absolute; top:18px; left:18px; z-index:5; pointer-events:none; }
+  .hud-hidden{ display:none !important; }
+  .hud-card{
+    display:flex; align-items:center; gap:10px; padding:9px 16px 9px 9px; border-radius:999px;
+    background:rgba(10,14,12,0.5); border:1px solid rgba(255,255,255,0.08);
+    backdrop-filter:blur(8px); box-shadow:0 8px 20px rgba(0,0,0,0.35);
+  }
+  .coin-badge{
+    width:30px; height:30px; border-radius:50%; flex-shrink:0;
+    background:radial-gradient(circle at 34% 30%, var(--gold-bright), var(--gold) 62%, var(--gold-deep) 100%);
+    box-shadow:0 2px 6px rgba(0,0,0,0.4), inset 0 1px 1px rgba(255,255,255,0.5);
+    display:flex; align-items:center; justify-content:center;
+  }
+  .coin-badge svg{ width:16px; height:16px; }
+  #cashValueWrap{ display:flex; flex-direction:column; line-height:1.15; }
+  #cashCounter{
+    font-family:'JetBrains Mono',monospace; font-weight:800; font-size:22px;
+    color:var(--gold-bright); text-shadow:0 1px 3px rgba(0,0,0,0.6);
+    letter-spacing:0.3px;
+  }
+  #rankLine{ font-size:10.5px; letter-spacing:1.2px; text-transform:uppercase; color:var(--dim); margin-top:1px; }
+  #rankLine b{ color:var(--gray); font-weight:600; }
+
+  /* ---------- Leaderboard ---------- */
+  #leaderboard{
+    position:absolute; top:18px; right:18px; width:184px; z-index:5;
+    background:rgba(12,16,15,0.34); border:1px solid rgba(255,255,255,0.06);
+    border-radius:12px; padding:12px 0 8px; backdrop-filter:blur(6px);
+    box-shadow:0 10px 26px rgba(0,0,0,0.3);
+  }
+  #leaderboard h3{
+    font-family:'Space Grotesk',sans-serif; font-size:10.5px; letter-spacing:2px; color:var(--dim);
+    text-transform:uppercase; margin-bottom:6px; text-align:center; font-weight:600;
+    display:flex; align-items:center; justify-content:center; gap:5px;
+  }
+  #leaderboard h3 svg{ width:11px; height:11px; opacity:0.8; }
+  #lbList{ list-style:none; font-family:'JetBrains Mono',monospace; font-size:11.5px; }
+  #lbList li{
+    display:flex; align-items:center; justify-content:space-between; padding:5px 12px;
+    color:var(--gray); border-left:3px solid transparent;
+  }
+  #lbList li + li{ border-top:1px solid rgba(255,255,255,0.04); }
+  #lbList li span.name{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:92px; color:var(--white-muted); font-weight:500; }
+  #lbList li.me{ border-left-color:var(--gold); background:rgba(240,194,74,0.07); }
+  #lbList li.me span.name{ color:var(--gold-bright); font-weight:700; }
+  #lbList li span:last-child{ color:var(--gold); font-weight:700; }
+  #lbList li .rk{ width:16px; color:var(--dim); font-weight:600; }
+
+  /* ---------- Overlays ---------- */
+  .overlay{
+    position:absolute; inset:0; z-index:20; display:flex; align-items:center; justify-content:center;
+    background:#0a0f0c;
+    opacity:1; pointer-events:auto;
+    transition:opacity 0.8s ease;
+  }
+  .overlay.hidden{ opacity:0; pointer-events:none; }
+
+  .panel{
+    text-align:center; max-width:410px; width:100%; padding:30px 26px 26px; position:relative;
+    background:linear-gradient(160deg, rgba(255,255,255,0.05), rgba(255,255,255,0.015));
+    border:1px solid var(--panel-border); border-radius:20px;
+    box-shadow:0 24px 60px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.05);
+    transition:transform 0.8s cubic-bezier(.2,.8,.2,1);
+    transform:scale(1) translateY(0);
+  }
+  .overlay.hidden .panel{ transform:scale(0.94) translateY(6px); }
+
+  .chip{
+    width:82px; height:82px; margin:0 auto 14px; border-radius:50%;
+    background: radial-gradient(circle at 35% 30%, var(--gold-bright), var(--gold) 55%, var(--gold-deep) 100%);
+    display:flex; align-items:center; justify-content:center;
+    font-family:'Anton',sans-serif; font-size:36px; color:#241a08;
+    box-shadow:0 0 0 6px rgba(240,194,74,0.08), 0 12px 26px rgba(0,0,0,0.5);
+    position:relative;
+  }
+  .chip::before{ content:""; position:absolute; inset:7px; border-radius:50%; border:2px dashed rgba(36,26,8,0.3); }
+  .title{
+    font-family:'Anton',sans-serif; font-size:38px; letter-spacing:2.5px;
+    color:var(--gold-bright); text-shadow:0 2px 10px rgba(0,0,0,0.55);
+    line-height:1; text-transform:uppercase;
+  }
+  .title span{ color:var(--white-muted); }
+  .tagline{ margin-top:8px; color:var(--dim); font-size:12.5px; letter-spacing:0.8px; }
+
+  #nameInput{
+    margin-top:6px; width:100%; padding:13px 16px; font-size:15px;
+    font-family:'Space Grotesk',sans-serif; font-weight:500; text-align:center; letter-spacing:0.4px;
+    background:rgba(255,255,255,0.04); border:1px solid var(--hairline);
+    border-radius:10px; color:var(--white-muted); outline:none;
+    transition:border-color .2s ease, box-shadow .2s ease;
+  }
+  #nameInput::placeholder{ color:var(--dim); }
+  #nameInput:focus{ border-color:rgba(240,194,74,0.5); box-shadow:0 0 0 3px rgba(240,194,74,0.1); }
+
+  /* ---------- Buttons: distinct identities ---------- */
+  .btn{
+    margin-top:14px; width:100%; padding:14px 16px; border:none; border-radius:12px;
+    font-family:'Space Grotesk',sans-serif; font-size:15px; font-weight:700; letter-spacing:0.3px;
+    cursor:pointer; position:relative; overflow:hidden;
+    transition:transform .2s cubic-bezier(.2,.8,.2,1), box-shadow .2s ease, filter .15s ease;
+  }
+  .btn:disabled{ cursor:not-allowed; opacity:0.65; transform:none !important; }
+  .btn-gold{
+    color:#241a08; background:linear-gradient(180deg, var(--gold-bright), var(--gold));
+    box-shadow:0 5px 0 var(--gold-deep), 0 14px 26px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.5);
+  }
+  .btn-gold:hover{ transform:translateY(-2px); filter:brightness(1.04); box-shadow:0 7px 0 var(--gold-deep), 0 18px 30px rgba(0,0,0,0.45), 0 0 20px rgba(240,194,74,0.3), inset 0 1px 0 rgba(255,255,255,0.5); }
+  .btn-gold:active{ transform:translateY(3px); filter:brightness(0.97); box-shadow:0 2px 0 var(--gold-deep), 0 6px 14px rgba(0,0,0,0.4); }
+
+  .btn-ghost{
+    color:var(--white-muted); background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1);
+    box-shadow:0 4px 0 rgba(0,0,0,0.3), 0 10px 20px rgba(0,0,0,0.3);
+  }
+  .btn-ghost:hover{ transform:translateY(-2px); background:rgba(255,255,255,0.08); box-shadow:0 5px 0 rgba(0,0,0,0.3), 0 14px 24px rgba(0,0,0,0.35), 0 0 16px var(--green-glow); }
+  .btn-ghost:active{ transform:translateY(2px); background:rgba(255,255,255,0.06); box-shadow:0 1px 0 rgba(0,0,0,0.3), 0 4px 10px rgba(0,0,0,0.3); }
+
+  .hint{ margin-top:14px; font-size:11px; color:var(--dim); line-height:1.6; letter-spacing:0.2px; }
+
+  /* ---------- Buy-in ---------- */
+  .buyin-wrap{ margin-top:16px; text-align:left; }
+  .buyin-label{ display:block; font-size:10.5px; letter-spacing:1.8px; text-transform:uppercase; color:var(--dim); margin-bottom:6px; font-weight:600; }
+  .buyin-field{
+    display:flex; align-items:center; background:rgba(255,255,255,0.04);
+    border:1px solid var(--hairline); border-radius:10px; padding:0 4px 0 16px;
+    transition:border-color .2s ease, box-shadow .2s ease;
+  }
+  .buyin-field:focus-within{ border-color:rgba(240,194,74,0.5); box-shadow:0 0 0 3px rgba(240,194,74,0.1); }
+  .buyin-sym{ color:var(--gold); font-family:'JetBrains Mono',monospace; font-weight:800; font-size:17px; }
+  #buyinInput{
+    flex:1; width:100%; padding:13px 12px; font-size:17px; font-family:'JetBrains Mono',monospace; font-weight:700;
+    background:transparent; border:none; outline:none; color:var(--gold-bright);
+    -moz-appearance:textfield; appearance:textfield;
+  }
+  #buyinInput::-webkit-outer-spin-button, #buyinInput::-webkit-inner-spin-button{ -webkit-appearance:none; appearance:none; margin:0; }
+
+  /* ---------- Earnings / wallet card ---------- */
+  .wallet-card{
+    margin-top:16px; text-align:left; background:rgba(255,255,255,0.03);
+    border:1px solid var(--hairline); border-radius:14px; padding:14px 16px 12px;
+  }
+  .wallet-top{ display:flex; align-items:center; justify-content:space-between; }
+  .wallet-label{ font-size:10.5px; letter-spacing:1.8px; text-transform:uppercase; color:var(--dim); font-weight:600; }
+  #walletAmount{ font-family:'JetBrains Mono',monospace; font-weight:800; font-size:20px; color:var(--gold-bright); text-shadow:0 1px 2px rgba(0,0,0,0.5); }
+  .wallet-sub{ margin-top:2px; font-size:10px; color:var(--dim); }
+  .wallet-withdraw{
+    margin-top:10px; width:100%; padding:8px; border-radius:8px; border:1px solid rgba(255,255,255,0.08);
+    background:transparent; color:var(--dim); font-family:'Space Grotesk',sans-serif;
+    font-size:10.5px; letter-spacing:0.6px; cursor:not-allowed;
+  }
+  .wallet-history{ margin-top:10px; border-top:1px solid var(--hairline); padding-top:8px; }
+  .wallet-hist-row{ display:flex; justify-content:space-between; font-family:'JetBrains Mono',monospace; font-size:10.5px; color:var(--dim); padding:2px 0; }
+  .wallet-hist-row .pos{ color:#6fcf97; }
+  .wallet-hist-row .neg{ color:var(--ruby); }
+  .wallet-empty{ font-size:10.5px; color:var(--dim); text-align:center; padding:4px 0; }
+
+  /* ---------- Choose Your Snake (bottom-left mini button) ---------- */
+  .choose-snake-btn{
+    position:absolute; left:22px; bottom:24px; display:flex; align-items:center; gap:10px;
+    padding:7px 14px 7px 7px; border-radius:999px; border:1px solid var(--hairline);
+    background:rgba(10,14,12,0.5); backdrop-filter:blur(6px); cursor:pointer;
+    box-shadow:0 8px 18px rgba(0,0,0,0.35);
+    transition:transform .18s cubic-bezier(.2,.8,.2,1), border-color .2s ease, box-shadow .2s ease;
+  }
+  .choose-snake-btn:hover{ transform:translateY(-2px); border-color:rgba(240,194,74,0.35); box-shadow:0 10px 22px rgba(0,0,0,0.4), 0 0 14px var(--green-glow); }
+  .choose-snake-btn:active{ transform:translateY(1px); }
+  .choose-snake-btn canvas{ display:block; border-radius:999px; background:rgba(255,255,255,0.02); }
+  .choose-snake-btn span{ font-size:11.5px; letter-spacing:0.5px; color:var(--gray); font-weight:600; white-space:nowrap; }
+
+  /* ---------- Skin select full page ---------- */
+  #skinSelectScreen .panel{ max-width:370px; }
+  .skin-select-title{ font-family:'Anton',sans-serif; font-size:18px; letter-spacing:2px; text-transform:uppercase; color:var(--gold-bright); margin-bottom:16px; }
+  #skinSelectPreview{
+    width:310px; max-width:78vw; height:132px; border-radius:16px;
+    background:radial-gradient(ellipse at center, rgba(18,74,51,0.35), rgba(5,8,6,0.9));
+    border:1px solid var(--hairline); box-shadow:inset 0 0 30px rgba(0,0,0,0.4);
+  }
+  .skin-name-big{ margin-top:14px; font-family:'Space Grotesk',sans-serif; font-size:16px; font-weight:700; letter-spacing:0.5px; color:var(--white-muted); }
+  .skin-index{ margin-top:3px; font-size:10.5px; color:var(--dim); letter-spacing:1px; }
+  .skin-side-arrow{
+    position:absolute; top:50%; transform:translateY(-50%); width:50px; height:50px; border-radius:50%;
+    background:rgba(255,255,255,0.05); border:1px solid var(--hairline);
+    color:var(--white-muted); font-size:15px; cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+    transition:transform .15s cubic-bezier(.2,.8,.2,1), background .2s ease, border-color .2s ease; z-index:2;
+  }
+  .skin-side-arrow:hover{ background:rgba(255,255,255,0.1); border-color:rgba(240,194,74,0.3); transform:translateY(-50%) translateY(-2px); }
+  .skin-side-arrow:active{ transform:translateY(-50%) scale(0.92); }
+  .skin-side-arrow.left{ left:26px; }
+  .skin-side-arrow.right{ right:26px; }
+
+  /* ---------- Cash out button (premium) ---------- */
+  #cashOutWrap{ position:absolute; left:18px; bottom:18px; z-index:6; }
+  #cashOutBtn{
+    display:flex; align-items:center; gap:8px; padding:12px 20px 12px 10px; border:none; border-radius:999px;
+    background:linear-gradient(180deg, var(--gold-bright), var(--gold));
+    color:#241a08; font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:13px;
+    letter-spacing:0.3px; cursor:pointer; position:relative; overflow:hidden;
+    box-shadow:0 5px 0 var(--gold-deep), 0 12px 22px rgba(0,0,0,0.4);
+    transition:transform .18s cubic-bezier(.2,.8,.2,1), box-shadow .2s ease;
+    animation:coBreathe 3.2s ease-in-out infinite;
+  }
+  @keyframes coBreathe{ 0%,100%{ box-shadow:0 5px 0 var(--gold-deep), 0 12px 22px rgba(0,0,0,0.4);} 50%{ box-shadow:0 5px 0 var(--gold-deep), 0 12px 22px rgba(0,0,0,0.4), 0 0 18px rgba(240,194,74,0.4);} }
+  #cashOutBtn::after{
+    content:""; position:absolute; top:0; left:-60%; width:40%; height:100%;
+    background:linear-gradient(115deg, transparent, rgba(255,255,255,0.55), transparent);
+    transform:skewX(-20deg); transition:left .55s ease;
+  }
+  #cashOutBtn:hover{ transform:translateY(-2px); box-shadow:0 6px 0 var(--gold-deep), 0 16px 26px rgba(0,0,0,0.45), 0 0 20px rgba(240,194,74,0.35); animation:none; }
+  #cashOutBtn:hover::after{ left:120%; }
+  #cashOutBtn:active{ transform:translateY(3px); box-shadow:0 1px 0 var(--gold-deep), 0 4px 10px rgba(0,0,0,0.4); }
+  #cashOutBtn .co-icon{
+    width:20px; height:20px; border-radius:50%; background:#241a08; color:var(--gold-bright);
+    display:flex; align-items:center; justify-content:center; font-family:'JetBrains Mono',monospace; font-size:12px; font-weight:800; flex-shrink:0;
+  }
+  #cashOutBtn.armed{ background:linear-gradient(180deg, #ff8f8f, var(--ruby)); animation:pulseArm 0.85s ease-in-out infinite; box-shadow:0 5px 0 var(--ruby-deep), 0 12px 22px rgba(0,0,0,0.4); }
+  #cashOutBtn.armed .co-icon{ color:var(--ruby); }
+  @keyframes pulseArm{ 0%,100%{ transform:scale(1);} 50%{ transform:scale(1.045);} }
+
+  #deathStats, #cashoutStats{ font-family:'JetBrains Mono',monospace; margin-top:16px; }
+  #deathStats .row, #cashoutStats .row{ display:flex; justify-content:space-between; align-items:center; padding:8px 4px; border-bottom:1px solid var(--hairline); font-size:13px; }
+  #deathStats .row span:first-child, #cashoutStats .row span:first-child{ color:var(--dim); font-family:'Space Grotesk',sans-serif; font-weight:500; font-size:12.5px; }
+  #deathStats .row span:last-child, #cashoutStats .row span:last-child{ color:var(--gold-bright); font-weight:800; }
+  .killLine{ margin-top:10px; color:var(--ruby); font-size:12px; letter-spacing:0.4px; }
+
+  /* mobile boost button */
+  #boostBtn{
+    position:absolute; right:26px; bottom:26px; width:80px; height:80px; border-radius:50%;
+    background:radial-gradient(circle at 35% 30%, var(--gold-bright), var(--gold) 70%);
+    box-shadow:0 0 0 6px rgba(240,194,74,0.1), 0 12px 24px rgba(0,0,0,0.45);
+    display:none; flex-direction:column; align-items:center; justify-content:center; gap:2px;
+    font-family:'Space Grotesk',sans-serif; font-size:10px; font-weight:700; color:#241a08; letter-spacing:0.8px;
+    z-index:8; touch-action:none; transition:transform .15s ease;
+  }
+  #boostBtn svg{ width:20px; height:20px; }
+  #boostBtn.active{ transform:scale(0.9); }
+  @media (pointer:coarse){ #boostBtn{ display:flex; } }
+
+  /* ---------- Loading screen ---------- */
+  #loadingScreen{
+    position:absolute; inset:0; z-index:100; display:flex; flex-direction:column;
+    align-items:center; justify-content:center;
+    background:#0a0f0c;
+    opacity:1; transition:opacity 0.8s ease;
+  }
+  #loadingScreen.hidden{ opacity:0; pointer-events:none; }
+  .loading-logo{ font-family:'Anton',sans-serif; font-size:32px; letter-spacing:3px; color:var(--gold-bright); text-shadow:0 0 18px rgba(240,194,74,0.4); text-transform:uppercase; }
+  .loading-logo span{ color:var(--white-muted); }
+  .loading-bar-track{ margin-top:28px; width:250px; max-width:70vw; height:7px; border-radius:999px; background:rgba(255,255,255,0.06); overflow:hidden; box-shadow:inset 0 0 4px rgba(0,0,0,0.6); }
+  .loading-bar-fill{ height:100%; width:0%; border-radius:999px; background:linear-gradient(90deg,#f0c24a,#ffe27a); box-shadow:0 0 14px 2px rgba(240,194,74,0.8), 0 0 28px 6px rgba(240,194,74,0.3); }
+  .loading-tip{ margin-top:20px; font-size:12px; color:var(--dim); max-width:290px; text-align:center; letter-spacing:0.2px; line-height:1.6; min-height:32px; padding:0 12px; }
+
+  /* ---------- Brand mark (menu only) ---------- */
+  .brand-mark{ position:absolute; top:24px; left:28px; font-family:'Anton',sans-serif; font-size:14px; letter-spacing:2px; color:var(--gold-bright); text-transform:uppercase; opacity:0; }
+  .brand-mark span{ color:var(--dim); }
+
+  /* ---------- Menu entrance animation ---------- */
+  @keyframes menuItemIn{ from{ opacity:0; transform:translateY(14px);} to{ opacity:1; transform:translateY(0);} }
+  @keyframes brandIn{ from{ opacity:0; transform:translateY(-8px);} to{ opacity:1; transform:translateY(0);} }
+  #startScreen .panel > *{ opacity:0; }
+  #startScreen.menu-ready .brand-mark{ animation:brandIn .6s ease forwards; animation-delay:.05s; }
+  #startScreen.menu-ready .panel > *{ animation:menuItemIn .55s cubic-bezier(.2,.8,.2,1) forwards; }
+  #startScreen.menu-ready .panel > *:nth-child(1){ animation-delay:.22s; }
+  #startScreen.menu-ready .panel > *:nth-child(2){ animation-delay:.30s; }
+  #startScreen.menu-ready .panel > *:nth-child(3){ animation-delay:.38s; }
+  #startScreen.menu-ready .panel > *:nth-child(4){ animation-delay:.46s; }
+  #startScreen.menu-ready .choose-snake-btn{ opacity:0; animation:menuItemIn .55s cubic-bezier(.2,.8,.2,1) forwards; animation-delay:.52s; }
+
+  /* death outro full-screen fade (drawn on canvas, this is just a safety DOM veil) */
+  #deathVeil{ position:absolute; inset:0; background:#000; opacity:0; pointer-events:none; z-index:15; }
+</style>
+</head>
+<body>
+
+<canvas id="menuBgCanvas"></canvas>
+<canvas id="gameCanvas"></canvas>
+<canvas id="minimap" width="130" height="130"></canvas>
+<div id="deathVeil"></div>
+
+<div id="hud" class="hud-hidden">
+  <div class="hud-card">
+    <div class="coin-badge">
+      <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" fill="#241a08" opacity="0.14"/><path d="M12 6v12M15.2 8.6c0-1.1-1.2-2-2.9-2-1.9 0-3.1.9-3.1 2.1 0 1.5 1.4 1.9 3.1 2.3 2 .5 3.1 1 3.1 2.4 0 1.3-1.3 2.2-3.1 2.2-1.8 0-3-0.9-3.1-2.1" stroke="#241a08" stroke-width="1.4" stroke-linecap="round"/></svg>
+    </div>
+    <div id="cashValueWrap">
+      <div id="cashCounter"><span class="sym">$</span><span id="cashValue">0.00</span></div>
+      <div id="rankLine">RANK <b id="rankValue">-</b> / <b id="aliveValue">-</b></div>
+    </div>
+  </div>
+</div>
+
+<div id="leaderboard" class="hud-hidden">
+  <h3><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M7 4h10v4a5 5 0 0 1-10 0V4z"/><path d="M7 5H4v2a3 3 0 0 0 3 3M17 5h3v2a3 3 0 0 1-3 3"/><path d="M12 13v3M9 20h6M10 16h4v4h-4z"/></svg> Top Cashers</h3>
+  <ol id="lbList"></ol>
+</div>
+
+<div id="cashOutWrap" class="hud-hidden">
+  <button id="cashOutBtn">
+    <span class="co-icon">$</span>
+    <span class="co-text"><span id="cashOutLabel">Cash Out</span> <span id="cashOutAmount">$0.00</span></span>
+  </button>
+</div>
+
+<div id="boostBtn">
+  <svg viewBox="0 0 24 24" fill="#241a08"><path d="M13 2 3 14h7l-1 8 11-14h-7l1-6z"/></svg>
+  BOOST
+</div>
+
+<!-- Loading screen -->
+<div id="loadingScreen">
+  <div class="loading-logo">SLITHER<span>CASH</span></div>
+  <div class="loading-bar-track"><div class="loading-bar-fill" id="loadingBarFill"></div></div>
+  <div class="loading-tip" id="loadingTip"></div>
+</div>
+
+<!-- Start screen -->
+<div id="startScreen" class="overlay hidden">
+  <div class="brand-mark">Slither<span>Cash</span></div>
+  <div class="panel">
+    <input id="nameInput" type="text" maxlength="16" placeholder="Enter your casher name">
+
+    <div class="wallet-card">
+      <div class="wallet-top">
+        <span class="wallet-label">Your Earnings</span>
+        <span id="walletAmount">$0.00</span>
+      </div>
+      <div class="wallet-sub">Practice balance, saved on this device</div>
+      <div id="walletHistory" class="wallet-history"></div>
+      <button class="wallet-withdraw" id="withdrawBtn" disabled>Withdraw &mdash; coming soon</button>
+    </div>
+
+    <div class="buyin-wrap">
+      <label for="buyinInput" class="buyin-label">Buy-in</label>
+      <div class="buyin-field">
+        <span class="buyin-sym">$</span>
+        <input id="buyinInput" type="number" min="0.5" max="500" step="0.5" value="5" inputmode="decimal">
+      </div>
+    </div>
+
+    <button class="btn btn-gold" id="playBtn">Buy In &amp; Play</button>
+    <div class="hint">Move mouse / drag to steer &middot; hold click, space, or BOOST to speed up</div>
+  </div>
+
+  <button type="button" class="choose-snake-btn" id="chooseSnakeBtn">
+    <canvas id="chooseSnakePreview" width="52" height="28"></canvas>
+    <span>Choose Your Snake</span>
+  </button>
+</div>
+
+<!-- Skin select screen -->
+<div id="skinSelectScreen" class="overlay hidden">
+  <button type="button" class="skin-side-arrow left" id="skinSelPrev" aria-label="Previous skin">&#10094;</button>
+  <div class="panel">
+    <div class="skin-select-title">Choose Your Snake</div>
+    <canvas id="skinSelectPreview" width="310" height="132"></canvas>
+    <div id="skinSelectName" class="skin-name-big">Gold Rush</div>
+    <div id="skinSelectIndex" class="skin-index">1 / 14</div>
+    <button class="btn btn-ghost" id="skinDoneBtn">Done</button>
+  </div>
+  <button type="button" class="skin-side-arrow right" id="skinSelNext" aria-label="Next skin">&#10095;</button>
+</div>
+
+<!-- Cash out screen -->
+<div id="cashoutScreen" class="overlay hidden">
+  <div class="panel">
+    <div class="chip">&#10003;</div>
+    <div class="title" style="color:var(--gold-bright);">CASHED OUT</div>
+    <div class="tagline">You walked away with your stack.</div>
+    <div id="cashoutStats">
+      <div class="row"><span>Final Bankroll</span><span id="cashoutFinalCash">$0.00</span></div>
+      <div class="row"><span>Best Rank Reached</span><span id="cashoutBestRank">-</span></div>
+      <div class="row"><span>Coins Collected</span><span id="cashoutCoinsEaten">0</span></div>
+    </div>
+    <button class="btn btn-ghost" id="cashoutMenuBtn">Back to Main Menu</button>
+  </div>
+</div>
+
+<!-- Death / game over screen -->
+<div id="deathScreen" class="overlay hidden">
+  <div class="panel">
+    <div class="chip" style="background:radial-gradient(circle at 35% 30%, #ff9a9a, var(--ruby) 70%); box-shadow:0 0 0 6px rgba(230,70,92,0.1), 0 12px 26px rgba(0,0,0,0.5);">&#10005;</div>
+    <div class="title" style="color:var(--ruby); text-shadow:0 2px 10px rgba(0,0,0,0.5);">WIPED OUT</div>
+    <div class="killLine" id="killLine"></div>
+    <div id="deathStats">
+      <div class="row"><span>Final Bankroll</span><span id="finalCash">$0</span></div>
+      <div class="row"><span>Best Rank Reached</span><span id="bestRank">-</span></div>
+      <div class="row"><span>Coins Collected</span><span id="coinsEaten">0</span></div>
+    </div>
+    <button class="btn btn-ghost" id="againBtn">Back to Main Menu</button>
+  </div>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+/* ============================== CONFIG ============================== */
+const CFG = {
+  WORLD_RADIUS: 3700,
+  POINT_SPACING: 4,
+  BASE_RADIUS: 6.5,
+  MIN_LEN: 6,
+  GROW_PER_ORB: 3.2,
+  NUM_BOTS: 50,
+  ORB_CAP: 700,
+  LEN_PER_DOLLAR: 8,
+  DEFAULT_BUYIN: 5,
+  MIN_BUYIN: 0.5,
+  MAX_BUYIN: 500,
+  NORMAL_SPEED: 145,
+  BOOST_MULT: 1.9,
+  TURN_RATE_BASE: 5.6,
+  BOOST_DRAIN_INTERVAL: 0.11,
+  CAM_ZOOM_MAX: 1.6,
+  CAM_ZOOM_MIN: 0.45,
+  CAM_ZOOM_SQRT_K: 0.037,
+  CAM_FOLLOW: 9,
+  GRID_CELL: 46,
+  DEATH_OUTRO_DURATION: 1.15,
+  DEATH_OUTRO_ZOOM: 0.34,
+};
+
+const SKINS = [
+  {name:"Gold Rush",         colors:["#f2c94c"],            glow:"#ffe9a8"},
+  {name:"Ice Cold",          colors:["#6fe7dd"],            glow:"#c8fff9"},
+  {name:"Ruby High Roller",  colors:["#e63950"],            glow:"#ff9aa6"},
+  {name:"Emerald Table",     colors:["#7ee787"],            glow:"#d3ffd6"},
+  {name:"Amethyst",          colors:["#c77dff"],            glow:"#ecd6ff"},
+  {name:"Sapphire",          colors:["#5aa9ff"],            glow:"#c6e2ff"},
+  {name:"Silver Chip",       colors:["#dfe3e8"],            glow:"#ffffff"},
+  {name:"Neon Mint",         colors:["#39d98a"],            glow:"#b9ffe0"},
+  {name:"Royal Flush",       colors:["#f2c94c","#e63950"],  glow:"#ffe9a8"},
+  {name:"Poison Dart",       colors:["#39d98a","#0d3324"],  glow:"#b9ffe0"},
+  {name:"Blue Chip",         colors:["#5aa9ff","#0b2036"],  glow:"#c6e2ff"},
+  {name:"Zebra Stack",       colors:["#f3ecd9","#141414"],  glow:"#ffffff"},
+  {name:"Hot Pink Fade",     colors:["#ff6ec7","#c77dff"],  glow:"#ffd1ec"},
+  {name:"Amber Blaze",       colors:["#ff9f45","#e63950"],  glow:"#ffd9ad"},
+];
+
+const BOT_NAME_PARTS1 = ["Big","Lucky","Silk","Cold","High","Fast","Slick","Diamond","Royal","Iron","Neon","Velvet","Turbo","Ghost","Prime"];
+const BOT_NAME_PARTS2 = ["Roller","Stacker","Hustler","Baron","Whale","Grinder","Shark","Bandit","Ace","Fox","Viper","Comet","Dealer","Chip","Runner"];
+function randName(){
+  return BOT_NAME_PARTS1[(Math.random()*BOT_NAME_PARTS1.length)|0] + BOT_NAME_PARTS2[(Math.random()*BOT_NAME_PARTS2.length)|0];
+}
+
+const LOADING_TIPS = [
+  "Boosting burns your bankroll to move faster — use it to escape, not to chase.",
+  "Bigger snakes turn slower. Cut sharp corners to shake a whale.",
+  "Coins only drop when a snake busts or boosts — there's no free money on the map.",
+  "Watch the minimap in the corner — clusters usually mean a fight, or a kill.",
+  "Cash out early and often. A live stack beats a dead one.",
+  "The arena boundary is just as deadly as another player.",
+  "Circling a smaller snake can cut off its escape route.",
+  "Your buy-in sets your starting size — bigger buy-ins start bigger.",
+  "Rank is tracked live — check your best rank on the results screen.",
+  "Cash bundles are worth more than coins — but everyone can see them glow.",
+];
+
+/* ============================== UTIL ============================== */
+function rand(a,b){ return a + Math.random()*(b-a); }
+function clamp(v,a,b){ return v<a?a:(v>b?b:v); }
+function dist2(x1,y1,x2,y2){ const dx=x1-x2, dy=y1-y2; return dx*dx+dy*dy; }
+function normAngle(a){ while(a>Math.PI)a-=Math.PI*2; while(a<-Math.PI)a+=Math.PI*2; return a; }
+function easeOutCubic(t){ return 1 - Math.pow(1-t, 3); }
+function toDollars(length){ return length / CFG.LEN_PER_DOLLAR; }
+function fmtMoney(length){ return '$' + toDollars(length).toFixed(2); }
+function startLenForBuyin(buyin){
+  const b = clamp(buyin, CFG.MIN_BUYIN, CFG.MAX_BUYIN);
+  return Math.max(8, b * CFG.LEN_PER_DOLLAR);
+}
+function randomBotBuyin(){
+  const r = Math.random();
+  if(r < 0.30) return rand(2, 8);
+  if(r < 0.60) return rand(8, 25);
+  if(r < 0.85) return rand(25, 60);
+  if(r < 0.97) return rand(60, 120);
+  return rand(120, 250);
+}
+
+/* ============================== DOM ============================== */
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const mmCanvas = document.getElementById('minimap');
+const mmCtx = mmCanvas.getContext('2d');
+const menuBgCanvas = document.getElementById('menuBgCanvas');
+const menuBgCtx = menuBgCanvas.getContext('2d');
+const deathVeil = document.getElementById('deathVeil');
+
+const startScreen = document.getElementById('startScreen');
+const deathScreen = document.getElementById('deathScreen');
+const cashoutScreen = document.getElementById('cashoutScreen');
+const skinSelectScreen = document.getElementById('skinSelectScreen');
+const loadingScreen = document.getElementById('loadingScreen');
+const nameInput = document.getElementById('nameInput');
+const buyinInput = document.getElementById('buyinInput');
+const playBtn = document.getElementById('playBtn');
+const againBtn = document.getElementById('againBtn');
+const hud = document.getElementById('hud');
+const leaderboardEl = document.getElementById('leaderboard');
+const lbList = document.getElementById('lbList');
+const cashValue = document.getElementById('cashValue');
+const rankValue = document.getElementById('rankValue');
+const aliveValue = document.getElementById('aliveValue');
+const boostBtn = document.getElementById('boostBtn');
+const cashOutWrap = document.getElementById('cashOutWrap');
+const cashOutBtn = document.getElementById('cashOutBtn');
+const cashOutLabel = document.getElementById('cashOutLabel');
+const cashOutAmount = document.getElementById('cashOutAmount');
+const cashoutMenuBtn = document.getElementById('cashoutMenuBtn');
+
+function resize(){
+  canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+  menuBgCanvas.width = window.innerWidth; menuBgCanvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+/* ============================== WALLET / EARNINGS ============================== */
+let wallet = 0;
+let history = [];
+
+function loadWallet(){
+  try{ const v = parseFloat(localStorage.getItem('sc_wallet_v1')); if(!isNaN(v)) return v; }catch(e){}
+  return 0;
+}
+function loadHistory(){
+  try{ const raw = localStorage.getItem('sc_history_v1'); if(raw) return JSON.parse(raw); }catch(e){}
+  return [];
+}
+function saveWallet(){ try{ localStorage.setItem('sc_wallet_v1', String(wallet)); }catch(e){} }
+function pushHistory(entry){
+  history.unshift(entry);
+  if(history.length>8) history.length = 8;
+  try{ localStorage.setItem('sc_history_v1', JSON.stringify(history)); }catch(e){}
+  renderWalletUI();
+}
+function renderWalletUI(){
+  const amt = document.getElementById('walletAmount');
+  if(amt) amt.textContent = '$'+wallet.toFixed(2);
+  const list = document.getElementById('walletHistory');
+  if(!list) return;
+  list.innerHTML = '';
+  if(history.length===0){ list.innerHTML = '<div class="wallet-empty">No games played yet</div>'; return; }
+  history.slice(0,4).forEach(h=>{
+    const row = document.createElement('div');
+    row.className = 'wallet-hist-row';
+    const net = h.net;
+    const sign = net>=0 ? '+' : '-';
+    const netClass = net>=0 ? 'pos' : 'neg';
+    row.innerHTML = '<span>$'+h.buyin.toFixed(2)+' &rarr; $'+h.result.toFixed(2)+'</span><span class="'+netClass+'">'+sign+'$'+Math.abs(net).toFixed(2)+'</span>';
+    list.appendChild(row);
+  });
+}
+
+/* ============================== GAME STATE ============================== */
+let world = null;
+let player = null;
+let running = false;
+let lastTime = 0;
+
+let mouseScreen = {x: window.innerWidth/2, y: window.innerHeight/2 - 40};
+let boosting = false;
+let spaceDown = false;
+
+let deathOutro = { active:false, t:0 };
+
+/* ============================== ENTITY FACTORIES ============================== */
+let idCounter = 1;
+
+function makeSnake(name, isPlayer, x, y, angle, skinIndex, startLen){
+  const skin = SKINS[skinIndex] || SKINS[0];
+  return {
+    id: idCounter++, name, isPlayer, alive: true,
+    skinIndex, colors: skin.colors, glow: skin.glow,
+    head: {x, y}, angle, targetAngle: angle,
+    points: [{x,y}], distSincePoint: 0,
+    length: startLen, buyin: toDollars(startLen),
+    coinsEaten: 0, boosting: false, boostTimer: 0, bestRank: 999,
+    colorSeed: rand(0, 999),
+    ai: { wanderTimer: rand(0.5,2), targetOrb: null }
+  };
+}
+function radiusFor(snake){
+  return clamp(CFG.BASE_RADIUS + Math.sqrt(snake.length)*0.62, CFG.BASE_RADIUS, 34);
+}
+function spawnOrb(x, y, value){
+  const useRandomPos = (x === undefined);
+  let px, py;
+  if(useRandomPos){
+    const r = Math.sqrt(Math.random()) * (CFG.WORLD_RADIUS - 60);
+    const a = Math.random()*Math.PI*2;
+    px = Math.cos(a)*r; py = Math.sin(a)*r;
+  } else { px = x; py = y; }
+  return { x: px, y: py, value: value || (Math.random()<0.12 ? 3 : 1), phase: Math.random()*Math.PI*2 };
+}
+function dropOrb(orb){
+  world.orbs.push(orb);
+  if(world.orbs.length > CFG.ORB_CAP) world.orbs.splice(0, world.orbs.length - CFG.ORB_CAP);
+}
+function spawnBot(){
+  const r = Math.sqrt(Math.random()) * (CFG.WORLD_RADIUS*0.75);
+  const a = Math.random()*Math.PI*2;
+  const x = Math.cos(a)*r, y = Math.sin(a)*r;
+  const skinIndex = (Math.random()*SKINS.length)|0;
+  const startLen = startLenForBuyin(randomBotBuyin());
+  world.snakes.push(makeSnake(randName(), false, x, y, rand(0,Math.PI*2), skinIndex, startLen));
+}
+
+/* ============================== WORLD INIT ============================== */
+function initWorld(playerName, buyin, skinIndex){
+  world = { snakes: [], orbs: [], particles: [], popups: [], grid: new Map(), elapsed: 0 };
+  const startLen = startLenForBuyin(buyin);
+  player = makeSnake(playerName || "Player", true, 0, 0, rand(0,Math.PI*2), skinIndex, startLen);
+  world.snakes.push(player);
+  camera.initialized = false;
+  deathOutro.active = false;
+  deathVeil.style.opacity = 0;
+  for(let i=0;i<CFG.NUM_BOTS;i++) spawnBot();
+}
+
+/* ============================== INPUT ============================== */
+canvas.addEventListener('mousemove', (e)=>{ mouseScreen.x = e.clientX; mouseScreen.y = e.clientY; });
+canvas.addEventListener('mousedown', ()=>{ boosting = true; });
+window.addEventListener('mouseup', ()=>{ boosting = false; });
+window.addEventListener('keydown', (e)=>{ if(e.code === 'Space'){ spaceDown = true; e.preventDefault(); } });
+window.addEventListener('keyup', (e)=>{ if(e.code === 'Space'){ spaceDown = false; } });
+
+canvas.addEventListener('touchmove', (e)=>{
+  if(e.touches.length){ mouseScreen.x = e.touches[0].clientX; mouseScreen.y = e.touches[0].clientY; }
+  e.preventDefault();
+}, {passive:false});
+canvas.addEventListener('touchstart', (e)=>{
+  if(e.touches.length){ mouseScreen.x = e.touches[0].clientX; mouseScreen.y = e.touches[0].clientY; }
+}, {passive:false});
+
+function bindBoostBtn(el){
+  const on = (e)=>{ boosting = true; el.classList.add('active'); if(e){e.preventDefault();} };
+  const off = (e)=>{ boosting = false; el.classList.remove('active'); if(e){e.preventDefault();} };
+  el.addEventListener('touchstart', on, {passive:false});
+  el.addEventListener('touchend', off, {passive:false});
+  el.addEventListener('mousedown', on);
+  el.addEventListener('mouseup', off);
+  el.addEventListener('mouseleave', off);
+}
+bindBoostBtn(boostBtn);
+
+/* ============================== MOVEMENT / AI ============================== */
+function updateSnakeMotion(snake, dt){
+  const radius = radiusFor(snake);
+  const maxTurn = CFG.TURN_RATE_BASE / (1 + radius*0.045);
+  let diff = normAngle(snake.targetAngle - snake.angle);
+  const step = clamp(diff, -maxTurn*dt, maxTurn*dt);
+  snake.angle = normAngle(snake.angle + step);
+
+  const wantsBoost = snake.boosting && snake.length > CFG.MIN_LEN + 4;
+  const speed = CFG.NORMAL_SPEED * (wantsBoost ? CFG.BOOST_MULT : 1);
+
+  snake.head.x += Math.cos(snake.angle)*speed*dt;
+  snake.head.y += Math.sin(snake.angle)*speed*dt;
+
+  snake.distSincePoint += speed*dt;
+  if(snake.distSincePoint >= CFG.POINT_SPACING){
+    snake.distSincePoint = 0;
+    snake.points.unshift({x: snake.head.x, y: snake.head.y});
+  }
+  const targetCount = Math.max(4, Math.round(snake.length / CFG.POINT_SPACING));
+  if(snake.points.length > targetCount){ snake.points.length = targetCount; }
+
+  if(wantsBoost){
+    snake.boostTimer -= dt;
+    if(snake.boostTimer <= 0){
+      snake.boostTimer = CFG.BOOST_DRAIN_INTERVAL;
+      snake.length = Math.max(CFG.MIN_LEN, snake.length - 1.4);
+      if(Math.random() < 0.8){
+        const tail = snake.points[snake.points.length-1] || snake.head;
+        dropOrb(spawnOrb(tail.x + rand(-4,4), tail.y + rand(-4,4), 1));
+      }
+    }
+  }
+}
+
+function botAI(snake, dt){
+  const ai = snake.ai;
+  const head = snake.head;
+
+  const distFromCenter = Math.hypot(head.x, head.y);
+  if(distFromCenter > CFG.WORLD_RADIUS - 260){
+    snake.targetAngle = Math.atan2(-head.y, -head.x);
+    ai.wanderTimer = 0.4;
+    return;
+  }
+
+  let threat = null, threatDist = 240*240;
+  for(const other of world.snakes){
+    if(other === snake || !other.alive) continue;
+    if(radiusFor(other) <= radiusFor(snake)*1.05) continue;
+    const d2 = dist2(head.x,head.y, other.head.x, other.head.y);
+    if(d2 < threatDist){ threatDist = d2; threat = other; }
+  }
+  if(threat){
+    snake.targetAngle = Math.atan2(head.y - threat.head.y, head.x - threat.head.x);
+    ai.wanderTimer = 0.3;
+    snake.boosting = Math.random() < 0.02;
+    return;
+  }
+
+  ai.wanderTimer -= dt;
+  if(ai.wanderTimer <= 0 || !ai.targetOrb){
+    ai.wanderTimer = rand(0.6, 1.4);
+    let best = null, bestD = 480*480;
+    const orbs = world.orbs;
+    const sampleStep = Math.max(1, Math.floor(orbs.length/60));
+    for(let i=0;i<orbs.length;i+=sampleStep){
+      const o = orbs[i];
+      const d2 = dist2(head.x,head.y,o.x,o.y);
+      if(d2 < bestD){ bestD = d2; best = o; }
+    }
+    ai.targetOrb = best;
+    if(!best){ snake.targetAngle = snake.angle + rand(-0.9,0.9); }
+  }
+  if(ai.targetOrb){ snake.targetAngle = Math.atan2(ai.targetOrb.y - head.y, ai.targetOrb.x - head.x); }
+  snake.boosting = false;
+}
+
+/* ============================== COLLISIONS ============================== */
+function buildGrid(){
+  world.grid.clear();
+  for(const s of world.snakes){
+    if(!s.alive) continue;
+    const r = radiusFor(s);
+    for(let i=0;i<s.points.length;i+=2){
+      const p = s.points[i];
+      const cx = Math.floor(p.x / CFG.GRID_CELL);
+      const cy = Math.floor(p.y / CFG.GRID_CELL);
+      const key = cx+","+cy;
+      let arr = world.grid.get(key);
+      if(!arr){ arr = []; world.grid.set(key, arr); }
+      arr.push({ownerId: s.id, x:p.x, y:p.y, r, isHead: i <= 2});
+    }
+  }
+}
+function checkSnakeCollision(snake){
+  const r = radiusFor(snake);
+  const cx = Math.floor(snake.head.x / CFG.GRID_CELL);
+  const cy = Math.floor(snake.head.y / CFG.GRID_CELL);
+  for(let gx=cx-1; gx<=cx+1; gx++){
+    for(let gy=cy-1; gy<=cy+1; gy++){
+      const arr = world.grid.get(gx+","+gy);
+      if(!arr) continue;
+      for(const entry of arr){
+        if(entry.ownerId === snake.id) continue;
+        if(entry.isHead) continue; // head-on handled separately
+        const minDist = (r*0.72 + entry.r*0.72);
+        if(dist2(snake.head.x, snake.head.y, entry.x, entry.y) < minDist*minDist){ return entry.ownerId; }
+      }
+    }
+  }
+  return null;
+}
+function checkOrbEating(snake){
+  const r = radiusFor(snake) + 5;
+  const orbs = world.orbs;
+  for(let i=orbs.length-1;i>=0;i--){
+    const o = orbs[i];
+    if(dist2(snake.head.x, snake.head.y, o.x, o.y) < r*r){
+      snake.length += CFG.GROW_PER_ORB * o.value;
+      snake.coinsEaten++;
+      // No pickup particle burst — it read as a distracting "cloud" on every coin.
+      orbs.splice(i,1);
+    }
+  }
+}
+
+/* ============================== DEATH / PARTICLES ============================== */
+function spawnCoinBurst(x,y,color,big){
+  const n = big ? 9 : 5;
+  for(let i=0;i<n;i++){
+    world.particles.push({ x, y, vx: rand(-70,70), vy: rand(-70,70), life: rand(0.3,0.6), maxLife: 0.6, color: big?'#ffe27a':color, type:'spark' });
+  }
+}
+
+function killSnake(snake, killerName){
+  snake.alive = false;
+  for(let i=0;i<snake.points.length;i+=3){
+    const p = snake.points[i];
+    world.orbs.push(spawnOrb(p.x + rand(-8,8), p.y + rand(-8,8), 2));
+  }
+  if(world.orbs.length > CFG.ORB_CAP){ world.orbs.splice(0, world.orbs.length - CFG.ORB_CAP); }
+  for(let i=0;i<18;i++){
+    world.particles.push({ x: snake.head.x, y: snake.head.y, vx: rand(-140,140), vy: rand(-140,140), life: rand(0.4,0.9), maxLife: 0.9, color: snake.colors[0], type:'burst' });
+  }
+  if(snake.isPlayer){
+    document.getElementById('killLine').textContent = killerName ? ("Cut off by " + killerName) : "Ran into the wall";
+    deathOutro.active = true;
+    deathOutro.t = 0;
+    deathOutro.killerName = killerName;
+  } else {
+    const idx = world.snakes.indexOf(snake);
+    if(idx>=0) world.snakes.splice(idx,1);
+    setTimeout(()=>{ if(running) spawnBot(); }, rand(1500,3500));
+  }
+}
+
+function finalizeDeathScreen(){
+  const finalLen = player.length;
+  pushHistory({ buyin: player.buyin, result: 0, net: -player.buyin, ts: Date.now() });
+  running = false;
+  hud.classList.add('hud-hidden');
+  leaderboardEl.classList.add('hud-hidden');
+  cashOutWrap.classList.add('hud-hidden');
+  boostBtn.style.display = 'none';
+  document.getElementById('bestRank').textContent = "#" + player.bestRank;
+  document.getElementById('coinsEaten').textContent = player.coinsEaten;
+  animateCountUp(document.getElementById('finalCash'), 0, toDollars(finalLen), 700);
+  deathScreen.classList.remove('hidden');
+  deathVeil.style.opacity = 0;
+}
+
+/* ============================== COUNT-UP HELPER ============================== */
+function animateCountUp(el, from, to, duration){
+  const start = performance.now();
+  function step(t){
+    const p = clamp((t-start)/duration, 0, 1);
+    const v = from + (to-from)*easeOutCubic(p);
+    el.textContent = '$' + v.toFixed(2);
+    if(p<1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+
+/* ============================== CAMERA ============================== */
+const camera = {x:0, y:0, zoom:1, initialized:false};
+function updateCamera(dt){
+  if(!camera.initialized){ camera.x = player.head.x; camera.y = player.head.y; camera.initialized = true; }
+  const followT = 1 - Math.exp(-CFG.CAM_FOLLOW*dt);
+  camera.x += (player.head.x - camera.x) * followT;
+  camera.y += (player.head.y - camera.y) * followT;
+  let targetZoom;
+  if(deathOutro.active){
+    targetZoom = CFG.DEATH_OUTRO_ZOOM;
+  } else {
+    targetZoom = clamp(CFG.CAM_ZOOM_MAX - Math.sqrt(player.length)*CFG.CAM_ZOOM_SQRT_K, CFG.CAM_ZOOM_MIN, CFG.CAM_ZOOM_MAX);
+  }
+  const zoomT = deathOutro.active ? Math.min(1, dt*1.6) : Math.min(1, dt*3);
+  camera.zoom += (targetZoom - camera.zoom) * zoomT;
+}
+function worldToScreen(x,y){
+  return { x: (x - camera.x)*camera.zoom + canvas.width/2, y: (y - camera.y)*camera.zoom + canvas.height/2 };
+}
+
+/* ============================== UPDATE LOOP ============================== */
+function update(dt){
+  world.elapsed += dt;
+
+  if(!deathOutro.active){
+    const rawCursorAngle = Math.atan2(mouseScreen.y - canvas.height/2, mouseScreen.x - canvas.width/2);
+    player.targetAngle = rawCursorAngle;
+    player.cursorAngle = rawCursorAngle;
+    player.boosting = boosting || spaceDown;
+  }
+
+  for(const s of world.snakes){
+    if(!s.alive) continue;
+    if(!s.isPlayer) botAI(s, dt);
+    updateSnakeMotion(s, dt);
+  }
+
+  buildGrid();
+
+  for(const s of world.snakes.slice()){
+    if(!s.alive) continue;
+    checkOrbEating(s);
+    const distFromCenter = Math.hypot(s.head.x, s.head.y);
+    if(distFromCenter > CFG.WORLD_RADIUS){ killSnake(s, null); continue; }
+    const killerId = checkSnakeCollision(s);
+    if(killerId !== null){
+      const killer = world.snakes.find(k=>k.id===killerId);
+      killSnake(s, killer ? killer.name : null);
+    }
+  }
+
+  for(let i=world.particles.length-1;i>=0;i--){
+    const p = world.particles[i];
+    p.life -= dt; p.x += p.vx*dt; p.y += p.vy*dt; p.vx *= 0.94; p.vy *= 0.94;
+    if(p.life<=0) world.particles.splice(i,1);
+  }
+
+  updateCamera(dt);
+  updateRankTracking();
+
+  if(deathOutro.active){
+    deathOutro.t += dt;
+    const p = clamp(deathOutro.t / CFG.DEATH_OUTRO_DURATION, 0, 1);
+    deathVeil.style.opacity = String(easeOutCubic(p)*0.94);
+    if(p>=1){
+      deathOutro.active = false;
+      finalizeDeathScreen();
+    }
+  }
+}
+function updateRankTracking(){
+  const alive = world.snakes.filter(s=>s.alive).sort((a,b)=>b.length-a.length);
+  const rank = alive.indexOf(player) + 1;
+  if(rank>0 && rank < player.bestRank) player.bestRank = rank;
+}
+
+/* ============================== RENDER: WORLD ============================== */
+function drawBackground(){
+  ctx.fillStyle = '#050705';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  const centerScreen = worldToScreen(0,0);
+  const R = CFG.WORLD_RADIUS * camera.zoom;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(centerScreen.x, centerScreen.y, R, 0, Math.PI*2);
+  ctx.clip();
+
+  const grad = ctx.createRadialGradient(centerScreen.x,centerScreen.y,0,centerScreen.x,centerScreen.y,R);
+  grad.addColorStop(0,'#173f2c');
+  grad.addColorStop(1,'#081a12');
+  ctx.fillStyle = grad;
+  ctx.fillRect(centerScreen.x-R, centerScreen.y-R, R*2, R*2);
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.045)';
+  ctx.lineWidth = 1;
+  const gridSize = 120 * camera.zoom;
+  const offX = ((canvas.width/2 - camera.x*camera.zoom) % gridSize + gridSize) % gridSize;
+  const offY = ((canvas.height/2 - camera.y*camera.zoom) % gridSize + gridSize) % gridSize;
+  for(let x=offX; x<canvas.width; x+=gridSize){
+    ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); ctx.stroke();
+  }
+  for(let y=offY; y<canvas.height; y+=gridSize){
+    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(canvas.width,y); ctx.stroke();
+  }
+
+  ctx.restore();
+
+  ctx.beginPath();
+  ctx.arc(centerScreen.x, centerScreen.y, R, 0, Math.PI*2);
+  ctx.strokeStyle = 'rgba(240,194,74,0.4)';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+}
+
+function drawOrbs(){
+  const half = Math.max(canvas.width,canvas.height)/camera.zoom;
+  for(const o of world.orbs){
+    if(Math.abs(o.x-camera.x) > half || Math.abs(o.y-camera.y) > half) continue;
+    const p = worldToScreen(o.x,o.y);
+    const big = o.value>1;
+    const pulse = 1 + Math.sin(world.elapsed*(big?3:4) + o.phase)*(big?0.16:0.08);
+    const rad = (big ? 7 : 4.5) * camera.zoom * pulse;
+
+    if(p.x<-20||p.x>canvas.width+20||p.y<-20||p.y>canvas.height+20) continue;
+
+    ctx.beginPath();
+    ctx.fillStyle = 'rgba(0,0,0,0.28)';
+    ctx.ellipse(p.x+rad*0.15, p.y+rad*0.45, rad*0.85, rad*0.4, 0, 0, Math.PI*2);
+    ctx.fill();
+
+    if(big){
+      // rare cash bundle: rounded rect + glow
+      ctx.save();
+      ctx.shadowColor = 'rgba(240,194,74,0.7)';
+      ctx.shadowBlur = 10*camera.zoom*pulse;
+      const w = rad*1.9, h = rad*1.3;
+      const rr = Math.min(4*camera.zoom, h*0.35);
+      const g = ctx.createLinearGradient(p.x-w/2,p.y-h/2,p.x+w/2,p.y+h/2);
+      g.addColorStop(0,'#fff3b0'); g.addColorStop(0.5,'#f0c24a'); g.addColorStop(1,'#a97c22');
+      ctx.beginPath();
+      ctx.moveTo(p.x-w/2+rr, p.y-h/2);
+      ctx.arcTo(p.x+w/2,p.y-h/2, p.x+w/2,p.y+h/2, rr);
+      ctx.arcTo(p.x+w/2,p.y+h/2, p.x-w/2,p.y+h/2, rr);
+      ctx.arcTo(p.x-w/2,p.y+h/2, p.x-w/2,p.y-h/2, rr);
+      ctx.arcTo(p.x-w/2,p.y-h/2, p.x+w/2,p.y-h/2, rr);
+      ctx.closePath();
+      ctx.fillStyle = g;
+      ctx.fill();
+      ctx.restore();
+      ctx.strokeStyle = 'rgba(36,26,8,0.4)'; ctx.lineWidth = Math.max(1,camera.zoom*0.7); ctx.stroke();
+    } else {
+      const g = ctx.createRadialGradient(p.x-rad*0.35, p.y-rad*0.35, rad*0.1, p.x, p.y, rad);
+      g.addColorStop(0,'#ffedb0'); g.addColorStop(0.55,'#f0c24a'); g.addColorStop(1,'#8a6316');
+      ctx.beginPath();
+      ctx.fillStyle = g;
+      ctx.arc(p.x,p.y,rad,0,Math.PI*2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.strokeStyle = 'rgba(0,0,0,0.32)';
+      ctx.lineWidth = Math.max(1, camera.zoom*0.7);
+      ctx.arc(p.x,p.y,rad,0,Math.PI*2);
+      ctx.stroke();
+    }
+  }
+}
+
+function drawSmoothPath(pctx, pts){
+  const L = pts.length;
+  if(L < 2){ pctx.moveTo(pts[0].x, pts[0].y); pctx.lineTo(pts[0].x, pts[0].y); return; }
+  if(L === 2){ pctx.moveTo(pts[0].x, pts[0].y); pctx.lineTo(pts[1].x, pts[1].y); return; }
+  pctx.moveTo(pts[0].x, pts[0].y);
+  for(let i=0; i<L-3; i++){
+    const xc = (pts[i+1].x + pts[i+2].x)/2;
+    const yc = (pts[i+1].y + pts[i+2].y)/2;
+    pctx.quadraticCurveTo(pts[i+1].x, pts[i+1].y, xc, yc);
+  }
+  // smooth taper into the true tail point instead of a hard straight segment
+  pctx.quadraticCurveTo(pts[L-2].x, pts[L-2].y, pts[L-1].x, pts[L-1].y);
+}
+
+/* Bands use the identical curve-piece math as drawSmoothPath, so colored
+   segments always sit exactly on top of the outline — even mid-turn. */
+function drawColorBands(pctx, pts, colors, r, timeShift, bandLenOverride){
+  const bandLen = bandLenOverride || 5;
+  const L = pts.length;
+  pctx.lineJoin = 'round'; pctx.lineCap = 'round';
+  if(L < 3){
+    pctx.beginPath(); drawSmoothPath(pctx, pts);
+    pctx.strokeStyle = colors[0]; pctx.lineWidth = r*2; pctx.stroke();
+    return;
+  }
+  function anchor(k){
+    if(k<=0) return pts[0];
+    if(k>=L-1) return pts[L-1];
+    return { x:(pts[k].x+pts[k+1].x)/2, y:(pts[k].y+pts[k+1].y)/2 };
+  }
+  function bandOf(idx){
+    return (((Math.floor((idx+timeShift)/bandLen))%colors.length)+colors.length)%colors.length;
+  }
+  const totalPieces = L-1; // piece indices 0..L-2; piece L-2 is the tail cap
+  let k = 0;
+  while(k < totalPieces){
+    const band = bandOf(Math.min(k+1, L-1));
+    let j = k;
+    while(j < totalPieces && bandOf(Math.min(j+1, L-1)) === band){ j++; }
+    pctx.beginPath();
+    const startA = anchor(k);
+    pctx.moveTo(startA.x, startA.y);
+    for(let p=k; p<j; p++){
+      if(p < L-2){
+        const c = pts[p+1];
+        const e = anchor(p+1);
+        pctx.quadraticCurveTo(c.x, c.y, e.x, e.y);
+      } else {
+        pctx.quadraticCurveTo(pts[L-2].x, pts[L-2].y, pts[L-1].x, pts[L-1].y);
+      }
+    }
+    pctx.strokeStyle = colors[band];
+    pctx.lineWidth = r*2;
+    pctx.stroke();
+    k = j;
+  }
+}
+
+function drawSnake(snake){
+  const pts = snake.points;
+  if(pts.length<2) return;
+  const r = radiusFor(snake) * camera.zoom;
+
+  const screenPts = [worldToScreen(snake.head.x, snake.head.y)];
+  for(let i=0;i<pts.length;i++) screenPts.push(worldToScreen(pts[i].x, pts[i].y));
+
+  // Level of detail: tiny/far-away snakes get a single cheap stroke instead
+  // of the full multi-pass shading — keeps frame time down when zoomed out
+  // with many snakes on screen at once.
+  if(r < 2.2){
+    ctx.save();
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    ctx.beginPath(); drawSmoothPath(ctx, screenPts);
+    ctx.strokeStyle = snake.colors[0];
+    ctx.lineWidth = Math.max(1, r*2);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+
+  const castShadowPts = screenPts.map(p=>({x:p.x + r*0.32, y:p.y + r*0.5}));
+  const shadowPts = screenPts.map(p=>({x:p.x, y:p.y + r*0.26}));
+  const highlightPts = screenPts.map(p=>({x:p.x, y:p.y - r*0.34}));
+  const specularPts = screenPts.map(p=>({x:p.x - r*0.12, y:p.y - r*0.5}));
+
+  // soft cast shadow onto the ground beneath the whole body (light from upper-left)
+  ctx.beginPath(); drawSmoothPath(ctx, castShadowPts);
+  ctx.strokeStyle = 'rgba(0,0,0,0.16)';
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  ctx.lineWidth = r*2.1;
+  ctx.stroke();
+
+  ctx.save();
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+
+  // dark outline for definition
+  ctx.beginPath(); drawSmoothPath(ctx, screenPts);
+  ctx.strokeStyle = 'rgba(0,0,0,0.45)'; ctx.lineWidth = r*2 + 3; ctx.stroke();
+
+  // underside tube shade
+  ctx.beginPath(); drawSmoothPath(ctx, shadowPts);
+  ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = r*1.15; ctx.stroke();
+
+  if(snake.colors.length > 1){
+    drawColorBands(ctx, screenPts, snake.colors, r, snake.colorSeed || 0);
+  } else {
+    ctx.beginPath(); drawSmoothPath(ctx, screenPts);
+    ctx.strokeStyle = snake.colors[0]; ctx.lineWidth = r*2; ctx.stroke();
+  }
+
+  // broad top-lit highlight (rounds the tube)
+  ctx.beginPath(); drawSmoothPath(ctx, highlightPts);
+  ctx.strokeStyle = snake.boosting ? 'rgba(255,255,255,0.34)' : 'rgba(255,255,255,0.18)';
+  ctx.lineWidth = Math.max(1, r*0.55); ctx.stroke();
+
+  // crisp specular shine line for a glossy, slither.io-like finish
+  ctx.beginPath(); drawSmoothPath(ctx, specularPts);
+  ctx.strokeStyle = snake.boosting ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.32)';
+  ctx.lineWidth = Math.max(0.8, r*0.18); ctx.stroke();
+
+  if(snake.boosting && r > 3){
+    ctx.save();
+    ctx.shadowColor = snake.glow; ctx.shadowBlur = 14 * camera.zoom;
+    ctx.globalAlpha = 0.55;
+    ctx.beginPath(); drawSmoothPath(ctx, screenPts);
+    ctx.strokeStyle = snake.glow; ctx.lineWidth = r*1.15; ctx.stroke();
+    ctx.restore();
+  }
+  ctx.restore();
+
+  const hp = screenPts[0];
+
+  // glossy rounded head cap
+  const headGrad = ctx.createRadialGradient(hp.x - r*0.3, hp.y - r*0.3, r*0.15, hp.x, hp.y, r*1.05);
+  headGrad.addColorStop(0, 'rgba(255,255,255,0.38)');
+  headGrad.addColorStop(0.45, 'rgba(255,255,255,0.05)');
+  headGrad.addColorStop(1, 'rgba(0,0,0,0.12)');
+  ctx.beginPath();
+  ctx.fillStyle = headGrad;
+  ctx.arc(hp.x, hp.y, r*1.02, 0, Math.PI*2);
+  ctx.fill();
+
+  const lookRaw = snake.isPlayer ? (snake.cursorAngle !== undefined ? snake.cursorAngle : snake.targetAngle) : snake.targetAngle;
+  const lookAngle = snake.angle + clamp(normAngle(lookRaw - snake.angle), -0.65, 0.65);
+
+  const socketSpread = 0.85;
+  const eyeR = Math.max(2, r*0.34);
+  const pupilR = Math.max(1.1, r*0.16);
+  const pupilRange = eyeR - pupilR;
+
+  for(const side of [1,-1]){
+    const socketAngle = snake.angle + side*socketSpread;
+    const sx = hp.x + Math.cos(socketAngle)*r*0.55;
+    const sy = hp.y + Math.sin(socketAngle)*r*0.55;
+    ctx.beginPath(); ctx.fillStyle = '#f4f4f0'; ctx.arc(sx, sy, eyeR, 0, Math.PI*2); ctx.fill();
+    const px = sx + Math.cos(lookAngle)*pupilRange*0.6;
+    const py = sy + Math.sin(lookAngle)*pupilRange*0.6;
+    ctx.beginPath(); ctx.fillStyle = '#141414'; ctx.arc(px, py, pupilR, 0, Math.PI*2); ctx.fill();
+  }
+
+  if(r>4){
+    ctx.font = "500 12px 'Space Grotesk', sans-serif";
+    ctx.fillStyle = 'rgba(234,238,233,0.88)';
+    ctx.textAlign = 'center';
+    ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 3;
+    ctx.fillText(snake.name, hp.x, hp.y - r - 10);
+    ctx.shadowBlur = 0;
+  }
+}
+
+function drawParticles(){
+  for(const p of world.particles){
+    const s = worldToScreen(p.x,p.y);
+    const a = clamp(p.life/p.maxLife, 0, 1);
+    ctx.globalAlpha = a;
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(s.x,s.y, (p.type==='burst'?3.5:2.5)*camera.zoom, 0, Math.PI*2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function draw(){
+  drawBackground();
+  drawOrbs();
+  const sorted = world.snakes.slice().sort((a,b)=> radiusFor(a)-radiusFor(b));
+  for(const s of sorted){ if(s.alive) drawSnake(s); }
+  drawParticles();
+  drawMinimap();
+}
+
+function drawMinimap(){
+  mmCtx.clearRect(0,0,130,130);
+  mmCtx.save();
+  mmCtx.beginPath(); mmCtx.arc(65,65,62,0,Math.PI*2); mmCtx.clip();
+  mmCtx.fillStyle = 'rgba(18,74,51,0.35)';
+  mmCtx.fillRect(0,0,130,130);
+  mmCtx.restore();
+
+  const scale = 62 / CFG.WORLD_RADIUS;
+  for(const s of world.snakes){
+    if(!s.alive) continue;
+    const x = 65 + s.head.x*scale, y = 65 + s.head.y*scale;
+    mmCtx.beginPath();
+    mmCtx.fillStyle = s.isPlayer ? '#ffe27a' : 'rgba(255,255,255,0.5)';
+    mmCtx.arc(x,y, s.isPlayer?3.5:2, 0, Math.PI*2);
+    mmCtx.fill();
+  }
+  mmCtx.beginPath();
+  mmCtx.arc(65,65,62,0,Math.PI*2);
+  mmCtx.strokeStyle = 'rgba(240,194,74,0.4)';
+  mmCtx.lineWidth = 1.5;
+  mmCtx.stroke();
+}
+
+/* ============================== HUD ============================== */
+let hudAccum = 0;
+function updateHUDAndLeaderboard(dt){
+  hudAccum += dt;
+  cashValue.textContent = toDollars(player.length).toFixed(2);
+  if(!cashOutBtn.classList.contains('armed')){ cashOutAmount.textContent = fmtMoney(player.length); }
+
+  if(hudAccum < 0.25) return;
+  hudAccum = 0;
+
+  const alive = world.snakes.filter(s=>s.alive).sort((a,b)=>b.length-a.length);
+  const rank = alive.indexOf(player)+1;
+  rankValue.textContent = rank>0?rank:'-';
+  aliveValue.textContent = alive.length;
+
+  lbList.innerHTML = '';
+  const top = alive.slice(0,10);
+  top.forEach((s,i)=>{
+    const li = document.createElement('li');
+    if(s===player) li.className='me';
+    li.innerHTML = '<span class="rk">'+(i+1)+'</span><span class="name">'+s.name+'</span><span>'+fmtMoney(s.length)+'</span>';
+    lbList.appendChild(li);
+  });
+  if(rank>10 && rank>0){
+    const li = document.createElement('li');
+    li.className = 'me';
+    li.innerHTML = '<span class="rk">'+rank+'</span><span class="name">'+player.name+'</span><span>'+fmtMoney(player.length)+'</span>';
+    lbList.appendChild(li);
+  }
+}
+
+/* ============================== MAIN LOOP ============================== */
+function frame(t){
+  if(!running) return;
+  const dt = Math.min(0.05, (t - lastTime)/1000 || 0.016);
+  lastTime = t;
+  update(dt);
+  draw();
+  updateHUDAndLeaderboard(dt);
+  requestAnimationFrame(frame);
+}
+
+/* ============================== SHARED PREVIEW RENDERER (menu snake widgets) ============================== */
+function renderPreviewSnake(pctx, w, h, skin, t, id){
+  pctx.clearRect(0,0,w,h);
+  const segCount = 15;
+  const spacing = w/segCount*0.95;
+  const startX = w*0.82;
+  const midY = h/2;
+  const amp = h*0.16;
+  const r = h*0.16;
+
+  const pts = [];
+  for(let i=0;i<segCount;i++){
+    const x = startX - i*spacing;
+    const y = midY + Math.sin(t - i*0.5)*amp;
+    pts.push({x,y});
+  }
+
+  pctx.lineJoin = 'round'; pctx.lineCap = 'round';
+  pctx.beginPath(); drawSmoothPath(pctx, pts);
+  pctx.strokeStyle = 'rgba(0,0,0,0.35)'; pctx.lineWidth = r*2+3; pctx.stroke();
+
+  if(skin.colors.length>1){
+    drawColorBands(pctx, pts, skin.colors, r, (id||0)*1.7, 2);
+  } else {
+    pctx.beginPath(); drawSmoothPath(pctx, pts);
+    pctx.strokeStyle = skin.colors[0]; pctx.lineWidth = r*2; pctx.stroke();
+  }
+
+  const hlPts = pts.map(p=>({x:p.x, y:p.y - r*0.3}));
+  pctx.beginPath(); drawSmoothPath(pctx, hlPts);
+  pctx.strokeStyle = 'rgba(255,255,255,0.22)'; pctx.lineWidth = Math.max(1, r*0.4); pctx.stroke();
+
+  const headAngle = Math.atan2(pts[0].y-pts[1].y, pts[0].x-pts[1].x);
+  for(const side of [1,-1]){
+    const sx = pts[0].x + Math.cos(headAngle+side*0.85)*r*0.55;
+    const sy = pts[0].y + Math.sin(headAngle+side*0.85)*r*0.55;
+    pctx.beginPath(); pctx.fillStyle = '#f4f4f0'; pctx.arc(sx,sy,r*0.32,0,Math.PI*2); pctx.fill();
+    pctx.beginPath(); pctx.fillStyle = '#141414'; pctx.arc(sx+Math.cos(headAngle)*r*0.14, sy+Math.sin(headAngle)*r*0.14, r*0.14,0,Math.PI*2); pctx.fill();
+  }
+}
+
+/* ============================== CHOOSE-YOUR-SNAKE MINI PREVIEW ============================== */
+const chooseSnakeBtn = document.getElementById('chooseSnakeBtn');
+const chooseSnakePreview = document.getElementById('chooseSnakePreview');
+const chooseSnakeCtx = chooseSnakePreview.getContext('2d');
+let miniRunning = false, miniT = 0, miniDemoIndex = 0, miniSwitchTimer = null;
+
+function drawMiniPreview(){
+  if(!miniRunning) return;
+  miniT += 0.05;
+  renderPreviewSnake(chooseSnakeCtx, chooseSnakePreview.width, chooseSnakePreview.height, SKINS[miniDemoIndex], miniT, 1);
+  requestAnimationFrame(drawMiniPreview);
+}
+function startMiniPreview(){
+  if(miniRunning) return;
+  miniRunning = true;
+  requestAnimationFrame(drawMiniPreview);
+  clearInterval(miniSwitchTimer);
+  miniSwitchTimer = setInterval(()=>{ miniDemoIndex = (miniDemoIndex+1) % SKINS.length; }, 2200);
+}
+function stopMiniPreview(){ miniRunning = false; clearInterval(miniSwitchTimer); }
+
+/* ============================== SKIN SELECT SCREEN ============================== */
+const skinSelectPreview = document.getElementById('skinSelectPreview');
+const skinSelectCtx = skinSelectPreview.getContext('2d');
+const skinSelectName = document.getElementById('skinSelectName');
+const skinSelectIndex = document.getElementById('skinSelectIndex');
+let selectedSkinIndex = 0;
+let bigRunning = false, bigT = 0;
+
+function drawBigPreview(){
+  if(!bigRunning) return;
+  bigT += 0.045;
+  renderPreviewSnake(skinSelectCtx, skinSelectPreview.width, skinSelectPreview.height, SKINS[selectedSkinIndex], bigT, 2);
+  requestAnimationFrame(drawBigPreview);
+}
+function startBigPreview(){ if(bigRunning) return; bigRunning = true; requestAnimationFrame(drawBigPreview); }
+function stopBigPreview(){ bigRunning = false; }
+
+function setSkin(idx){
+  selectedSkinIndex = (idx + SKINS.length) % SKINS.length;
+  skinSelectName.textContent = SKINS[selectedSkinIndex].name;
+  skinSelectIndex.textContent = (selectedSkinIndex+1) + ' / ' + SKINS.length;
+}
+setSkin(0);
+document.getElementById('skinSelPrev').addEventListener('click', ()=> setSkin(selectedSkinIndex-1));
+document.getElementById('skinSelNext').addEventListener('click', ()=> setSkin(selectedSkinIndex+1));
+
+/* ============================== MENU BACKGROUND ============================== */
+let menuBgRunning = false;
+
+function drawAmbientBackground(){
+  // Flat, solid theme color — no drifting snakes or particles. Keeps the menu
+  // clean and makes sure nothing from the previous match is visible behind it.
+  menuBgCtx.fillStyle = '#0a0f0c';
+  menuBgCtx.fillRect(0,0,menuBgCanvas.width, menuBgCanvas.height);
+}
+
+function menuBgLoop(){
+  if(!menuBgRunning) return;
+  drawAmbientBackground();
+  // Static fill — no per-frame animation needed, so we don't keep re-queuing.
+}
+function startMenuBg(){
+  menuBgRunning = true;
+  drawAmbientBackground();
+}
+function stopMenuBg(){ menuBgRunning = false; }
+
+/** Wipes the last painted game frame so it can't show through the menu overlay. */
+function clearGameCanvas(){
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  mmCtx.clearRect(0, 0, mmCanvas.width, mmCanvas.height);
+}
+
+/* ============================== MULTIPLAYER NETWORKING ============================== */
+let ws = null;
+let netYouId = null;
+let netSnakes = new Map(); // id -> render-snake object, same shape drawSnake()/HUD already expect
+let netOrbsRaw = [];
+let playerBestRank = 999;
+let pendingDeath = null;
+let lastInputSent = 0;
+
+function wsUrl(){
+  if(location.protocol === 'file:') return 'ws://localhost:8787'; // opened the HTML directly, not served by the server
+  const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+  return proto + location.host;
+}
+
+function connectAndJoin(name, buyin, skinIndex){
+  return new Promise((resolve, reject)=>{
+    let sock;
+    try{ sock = new WebSocket(wsUrl()); }
+    catch(e){ reject(new Error('Could not open a connection')); return; }
+    ws = sock;
+
+    const failTimer = setTimeout(()=>{ reject(new Error('Connection timed out')); }, 6000);
+
+    sock.addEventListener('open', ()=>{
+      sock.send(JSON.stringify({ t:'join', name, buyin, skinIndex }));
+    });
+    sock.addEventListener('message', (ev)=>{
+      let msg;
+      try{ msg = JSON.parse(ev.data); }catch(e){ return; }
+      if(msg.t === 'welcome'){
+        clearTimeout(failTimer);
+        netYouId = msg.id;
+        if(msg.cfg){
+          CFG.WORLD_RADIUS = msg.cfg.WORLD_RADIUS;
+          CFG.LEN_PER_DOLLAR = msg.cfg.LEN_PER_DOLLAR;
+        }
+        resolve();
+        return;
+      }
+      handleNetMessage(msg);
+    });
+    sock.addEventListener('close', ()=>{
+      if(running) handleDisconnect();
+    });
+    sock.addEventListener('error', ()=>{
+      clearTimeout(failTimer);
+      reject(new Error('Could not reach the game server'));
+    });
+  });
+}
+
+function netDisconnect(){
+  if(ws){ try{ ws.close(); }catch(e){} ws = null; }
+  netYouId = null;
+  netSnakes.clear();
+}
+
+function handleNetMessage(msg){
+  if(msg.t === 'snapshot') applySnapshot(msg);
+  else if(msg.t === 'death') handleNetDeath(msg);
+  else if(msg.t === 'cashout_result') handleNetCashout(msg);
+}
+
+function applySnapshot(msg){
+  netOrbsRaw = msg.orbs || [];
+  const seen = new Set();
+  for(const s of (msg.snakes || [])){
+    seen.add(s.id);
+    let rs = netSnakes.get(s.id);
+    if(!rs){
+      const skin = SKINS[s.skinIndex] || SKINS[0];
+      rs = {
+        id: s.id, name: s.name, isPlayer: s.isPlayer, alive: true,
+        skinIndex: s.skinIndex, colors: skin.colors, glow: skin.glow,
+        head: { x: s.x, y: s.y }, angle: s.angle, targetAngle: s.angle,
+        points: [{ x: s.x, y: s.y }], distSincePoint: 0,
+        raw: [{ x: s.x, y: s.y }],
+        length: s.length, buyin: s.length / CFG.LEN_PER_DOLLAR, coinsEaten: 0,
+        boosting: s.boosting, bestRank: 999, colorSeed: s.colorSeed,
+        netX: s.x, netY: s.y, netAngle: s.angle,
+      };
+      netSnakes.set(s.id, rs);
+    }
+    rs.netX = s.x; rs.netY = s.y; rs.netAngle = s.angle;
+    rs.length = s.length; rs.boosting = s.boosting; rs.name = s.name;
+  }
+  for(const id of Array.from(netSnakes.keys())){
+    if(!seen.has(id)) netSnakes.delete(id);
+  }
+}
+
+/** Smoothly moves each rendered snake toward its latest server-reported position/angle,
+    and rebuilds its visual trail the same way the old local simulation did. */
+/**
+ * Walks a dense path and returns points spaced at EXACTLY `spacing` apart.
+ * The old approach appended a point whenever accumulated movement crossed the
+ * threshold and then reset the remainder to zero, so real spacing drifted with
+ * frame timing — that irregularity is what made bodies look like they wobbled.
+ */
+function resamplePath(raw, spacing, count){
+  const out = [];
+  if(raw.length === 0) return out;
+  out.push({ x: raw[0].x, y: raw[0].y });
+  if(raw.length === 1) return out;
+
+  let curX = raw[0].x, curY = raw[0].y;
+  let i = 0;
+  let remaining = spacing;
+
+  while(out.length < count && i < raw.length - 1){
+    const bx = raw[i+1].x, by = raw[i+1].y;
+    const segLen = Math.hypot(bx - curX, by - curY);
+    if(segLen < 1e-6){ i++; curX = bx; curY = by; continue; }
+    if(segLen >= remaining){
+      const t = remaining / segLen;
+      curX = curX + (bx - curX) * t;
+      curY = curY + (by - curY) * t;
+      out.push({ x: curX, y: curY });
+      remaining = spacing;
+    } else {
+      remaining -= segLen;
+      i++;
+      curX = bx; curY = by;
+    }
+  }
+  return out;
+}
+
+function netInterpolate(dt){
+  const posT = 1 - Math.exp(-14 * dt);  // frame-rate independent easing
+  const angT = 1 - Math.exp(-14 * dt);
+
+  for(const rs of netSnakes.values()){
+    const dx = rs.netX - rs.head.x, dy = rs.netY - rs.head.y;
+    if(Math.hypot(dx, dy) > 250){
+      // spawn / large correction — snap, and reset the trail so it doesn't
+      // stretch a straight line across the map
+      rs.head.x = rs.netX; rs.head.y = rs.netY;
+      rs.raw = [{ x: rs.head.x, y: rs.head.y }];
+    } else {
+      rs.head.x += dx * posT; rs.head.y += dy * posT;
+    }
+
+    const angDiff = normAngle(rs.netAngle - rs.angle);
+    rs.angle = normAngle(rs.angle + angDiff * angT);
+
+    if(!rs.raw) rs.raw = [{ x: rs.head.x, y: rs.head.y }];
+
+    // Record head motion into a dense history, skipping near-duplicates.
+    const head0 = rs.raw[0];
+    if(Math.hypot(rs.head.x - head0.x, rs.head.y - head0.y) > 0.35){
+      rs.raw.unshift({ x: rs.head.x, y: rs.head.y });
+    } else {
+      head0.x = rs.head.x; head0.y = rs.head.y;
+    }
+
+    const targetCount = Math.max(4, Math.round(rs.length / CFG.POINT_SPACING));
+
+    // Trim history to just past what the body actually needs.
+    const neededDist = (targetCount + 2) * CFG.POINT_SPACING;
+    let acc = 0;
+    let cut = rs.raw.length;
+    for(let i = 1; i < rs.raw.length; i++){
+      acc += Math.hypot(rs.raw[i].x - rs.raw[i-1].x, rs.raw[i].y - rs.raw[i-1].y);
+      if(acc > neededDist){ cut = i + 1; break; }
+    }
+    if(cut < rs.raw.length) rs.raw.length = cut;
+
+    rs.points = resamplePath(rs.raw, CFG.POINT_SPACING, targetCount);
+    if(rs.points.length < 2) rs.points = [{ x: rs.head.x, y: rs.head.y }, { x: rs.head.x, y: rs.head.y }];
+  }
+}
+
+function updateNetRankTracking(){
+  if(!player) return;
+  const alive = Array.from(netSnakes.values()).sort((a,b)=>b.length-a.length);
+  const rank = alive.indexOf(player) + 1;
+  if(rank > 0 && rank < playerBestRank) playerBestRank = rank;
+  player.bestRank = playerBestRank;
+}
+
+function sendInputThrottled(angle, boostingFlag){
+  const now = performance.now();
+  if(now - lastInputSent < 50) return; // ~20/sec is plenty for steering
+  lastInputSent = now;
+  if(ws && ws.readyState === WebSocket.OPEN){
+    ws.send(JSON.stringify({ t:'input', angle, boosting: boostingFlag }));
+  }
+}
+
+function netUpdate(dt){
+  world.elapsed += dt;
+  netInterpolate(dt);
+  world.orbs = netOrbsRaw.map(o => ({ x:o.x, y:o.y, value:o.v, phase:(o.x*0.13+o.y*0.07) % (Math.PI*2) }));
+  world.snakes = Array.from(netSnakes.values());
+  if(netYouId) player = netSnakes.get(netYouId) || player;
+
+  if(player && !deathOutro.active){
+    const rawCursorAngle = Math.atan2(mouseScreen.y - canvas.height/2, mouseScreen.x - canvas.width/2);
+    player.targetAngle = rawCursorAngle;
+    player.cursorAngle = rawCursorAngle;
+    player.boosting = boosting || spaceDown;
+    sendInputThrottled(rawCursorAngle, player.boosting);
+  }
+
+  if(player){
+    updateCamera(dt);
+    updateNetRankTracking();
+  }
+
+  if(deathOutro.active){
+    deathOutro.t += dt;
+    const p = clamp(deathOutro.t / CFG.DEATH_OUTRO_DURATION, 0, 1);
+    deathVeil.style.opacity = String(easeOutCubic(p) * 0.94);
+    if(p >= 1){
+      deathOutro.active = false;
+      finalizeNetDeathScreen();
+    }
+  }
+}
+
+function netFrame(t){
+  if(!running) return;
+  const dt = Math.min(0.05, (t - lastTime)/1000 || 0.016);
+  lastTime = t;
+  netUpdate(dt);
+  if(player){
+    draw();
+    updateHUDAndLeaderboard(dt);
+  }
+  requestAnimationFrame(netFrame);
+}
+
+function handleNetDeath(msg){
+  document.getElementById('killLine').textContent = msg.killerName ? ('Cut off by ' + msg.killerName) : 'Ran into the wall';
+  pendingDeath = msg;
+  deathOutro.active = true;
+  deathOutro.t = 0;
+}
+
+function finalizeNetDeathScreen(){
+  const msg = pendingDeath || {};
+  running = false;
+  hud.classList.add('hud-hidden');
+  leaderboardEl.classList.add('hud-hidden');
+  cashOutWrap.classList.add('hud-hidden');
+  boostBtn.style.display = 'none';
+  document.getElementById('bestRank').textContent = '#' + (msg.bestRank || playerBestRank);
+  document.getElementById('coinsEaten').textContent = msg.coinsEaten || 0;
+  const finalLen = player ? player.length : (msg.buyin || 0) * CFG.LEN_PER_DOLLAR;
+  animateCountUp(document.getElementById('finalCash'), 0, toDollars(finalLen), 700);
+  pushHistory({ buyin: msg.buyin || (player ? player.buyin : 0), result: 0, net: -(msg.buyin || 0), ts: Date.now() });
+  deathScreen.classList.remove('hidden');
+  deathVeil.style.opacity = 0;
+  netDisconnect();
+}
+
+function handleNetCashout(msg){
+  running = false;
+  wallet += msg.amount;
+  saveWallet();
+  pushHistory({ buyin: msg.buyin, result: msg.amount, net: msg.amount - msg.buyin, ts: Date.now() });
+
+  document.getElementById('cashoutBestRank').textContent = '#' + msg.bestRank;
+  document.getElementById('cashoutCoinsEaten').textContent = msg.coinsEaten;
+  animateCountUp(document.getElementById('cashoutFinalCash'), 0, msg.amount, 700);
+
+  hud.classList.add('hud-hidden');
+  leaderboardEl.classList.add('hud-hidden');
+  cashOutWrap.classList.add('hud-hidden');
+  boostBtn.style.display = 'none';
+  switchOverlay(null, cashoutScreen);
+  netDisconnect();
+}
+
+function handleDisconnect(){
+  running = false;
+  hud.classList.add('hud-hidden');
+  leaderboardEl.classList.add('hud-hidden');
+  cashOutWrap.classList.add('hud-hidden');
+  boostBtn.style.display = 'none';
+  deathScreen.classList.add('hidden');
+  cashoutScreen.classList.add('hidden');
+  netSnakes.clear();
+  alert('Lost connection to the game server. Returning to the menu.');
+  goToMenu(null);
+}
+
+/* ============================== OVERLAY NAVIGATION ============================== */
+function switchOverlay(fromEl, toEl, focusEl){
+  if(fromEl) fromEl.classList.add('hidden');
+  const delay = fromEl ? 750 : 0;
+  setTimeout(()=>{
+    if(toEl){ toEl.classList.remove('hidden'); if(focusEl) focusEl.focus(); }
+  }, delay);
+}
+
+chooseSnakeBtn.addEventListener('click', ()=>{
+  stopMiniPreview();
+  startBigPreview();
+  switchOverlay(startScreen, skinSelectScreen);
+});
+document.getElementById('skinDoneBtn').addEventListener('click', ()=>{
+  stopBigPreview();
+  startMiniPreview();
+  switchOverlay(skinSelectScreen, startScreen, nameInput);
+});
+
+/* ============================== START / RESTART ============================== */
+async function startGame(){
+  const name = nameInput.value.trim() || randName();
+  let buyin = parseFloat(buyinInput.value);
+  if(isNaN(buyin) || buyin <= 0) buyin = CFG.DEFAULT_BUYIN;
+  buyin = clamp(buyin, CFG.MIN_BUYIN, CFG.MAX_BUYIN);
+  buyinInput.value = buyin;
+
+  playBtn.disabled = true;
+  playBtn.textContent = 'Connecting...';
+  try{
+    await connectAndJoin(name, buyin, selectedSkinIndex);
+  }catch(err){
+    playBtn.disabled = false;
+    playBtn.textContent = 'Buy In & Play';
+    alert('Could not connect to the game server.\n\nMake sure the server is running (node index.js) and you opened this page from that server (e.g. http://localhost:8787), not by double-clicking the file.\n\nDetails: ' + err.message);
+    netDisconnect();
+    return;
+  }
+  playBtn.disabled = false;
+  playBtn.textContent = 'Buy In & Play';
+
+  world = { snakes: [], orbs: [], particles: [], grid: new Map(), elapsed: 0 };
+  netSnakes.clear();
+  playerBestRank = 999;
+  pendingDeath = null;
+  player = null;
+  camera.initialized = false;
+  deathOutro.active = false;
+  deathVeil.style.opacity = 0;
+
+  running = true;
+  lastTime = performance.now();
+  stopMiniPreview();
+  stopMenuBg();
+  switchOverlay(startScreen, null);
+  deathScreen.classList.add('hidden');
+  cashoutScreen.classList.add('hidden');
+  hud.classList.remove('hud-hidden');
+  leaderboardEl.classList.remove('hud-hidden');
+  cashOutWrap.classList.remove('hud-hidden');
+  cashOutBtn.classList.remove('armed');
+  cashOutLabel.textContent = 'Cash Out';
+  boostBtn.style.display = window.matchMedia('(pointer:coarse)').matches ? 'flex' : 'none';
+  requestAnimationFrame(netFrame);
+}
+
+function goToMenu(fromEl){
+  running = false;
+  netDisconnect();
+  clearGameCanvas();
+  deathVeil.style.opacity = 0;
+  switchOverlay(fromEl || null, startScreen, nameInput);
+  renderWalletUI();
+  startMiniPreview();
+  startMenuBg();
+}
+
+playBtn.addEventListener('click', startGame);
+nameInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') startGame(); });
+buyinInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') startGame(); });
+againBtn.addEventListener('click', ()=> goToMenu(deathScreen));
+
+/* ============================== CASH OUT ============================== */
+let cashOutArmed = false;
+let cashOutArmTimer = null;
+
+cashOutBtn.addEventListener('click', ()=>{
+  if(!running || deathOutro.active) return;
+  if(!cashOutArmed){
+    cashOutArmed = true;
+    cashOutBtn.classList.add('armed');
+    cashOutLabel.textContent = 'Confirm?';
+    clearTimeout(cashOutArmTimer);
+    cashOutArmTimer = setTimeout(()=>{
+      cashOutArmed = false;
+      cashOutBtn.classList.remove('armed');
+      cashOutLabel.textContent = 'Cash Out';
+    }, 2500);
+    return;
+  }
+  clearTimeout(cashOutArmTimer);
+  cashOutArmed = false;
+  performCashOut();
+});
+
+function performCashOut(){
+  if(ws && ws.readyState === WebSocket.OPEN){
+    ws.send(JSON.stringify({ t:'cashout' }));
+  }
+  // UI transition happens in handleNetCashout() once the server confirms the amount.
+}
+cashoutMenuBtn.addEventListener('click', ()=> goToMenu(cashoutScreen));
+
+/* ============================== LOADING SCREEN ============================== */
+function runLoadingScreen(){
+  document.getElementById('loadingTip').textContent = LOADING_TIPS[(Math.random()*LOADING_TIPS.length)|0];
+  const fill = document.getElementById('loadingBarFill');
+  const duration = 3800 + Math.random()*400;
+  const start = performance.now();
+
+  startMenuBg();
+
+  function step(t){
+    const elapsed = t - start;
+    const pct = clamp(elapsed/duration, 0, 1);
+    fill.style.width = (pct*100).toFixed(1) + '%';
+    if(pct < 1){ requestAnimationFrame(step); }
+    else {
+      loadingScreen.classList.add('hidden');
+      setTimeout(()=>{
+        startScreen.classList.remove('hidden');
+        startScreen.classList.add('menu-ready');
+        startMiniPreview();
+      }, 150);
+    }
+  }
+  requestAnimationFrame(step);
+}
+
+/* ============================== INIT ============================== */
+wallet = loadWallet();
+history = loadHistory();
+renderWalletUI();
+runLoadingScreen();
+
+})();
+</script>
+</body>
+</html>
