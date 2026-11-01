@@ -27,7 +27,9 @@ const CFG = {
   ORB_CAP: 700,
   LEN_PER_DOLLAR: 8,
   DEFAULT_BUYIN: 5,
-  MIN_BUYIN: 0.5,
+  // Must be >= 8 / LEN_PER_DOLLAR: startLenForBuyin() floors the starting length at 8,
+  // so anything below $1 would start (and cash out) worth more than was paid in.
+  MIN_BUYIN: 1,
   MAX_BUYIN: 500,
   NORMAL_SPEED: 145,
   BOOST_MULT: 1.9,
@@ -38,6 +40,7 @@ const CFG = {
 };
 
 const SKIN_COUNT = 14; // must match client's SKINS.length
+const BOOST_BURN = 1.4; // length a snake burns per boost tick
 
 function rand(a, b) { return a + Math.random() * (b - a); }
 function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
@@ -170,11 +173,11 @@ class GameWorld {
       snake.boostTimer -= dt;
       if (snake.boostTimer <= 0) {
         snake.boostTimer = CFG.BOOST_DRAIN_INTERVAL;
-        snake.length = Math.max(CFG.MIN_LEN, snake.length - 1.4);
-        if (Math.random() < 0.8) {
-          const tail = snake.points[snake.points.length - 1] || snake.head;
-          this._dropOrb(spawnOrb(tail.x + rand(-4, 4), tail.y + rand(-4, 4), 1));
-        }
+        snake.length = Math.max(CFG.MIN_LEN, snake.length - BOOST_BURN);
+        // The orb is worth exactly the length that was burned (an orb of value v adds
+        // GROW_PER_ORB * v length), so boosting moves value around but never creates it.
+        const tail = snake.points[snake.points.length - 1] || snake.head;
+        this._dropOrb(spawnOrb(tail.x + rand(-4, 4), tail.y + rand(-4, 4), BOOST_BURN / CFG.GROW_PER_ORB));
       }
     }
   }
