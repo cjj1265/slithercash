@@ -310,6 +310,95 @@
 
   /* death outro full-screen fade (drawn on canvas, this is just a safety DOM veil) */
   #deathVeil{ position:absolute; inset:0; background:#000; opacity:0; pointer-events:none; z-index:15; }
+
+  /* ---------- Solana wallet (devnet) ---------- */
+  #startScreen .panel{ max-height:calc(100vh - 24px); overflow-y:auto; scrollbar-width:none; }
+  #startScreen .panel::-webkit-scrollbar{ display:none; }
+  .sol-hidden{ display:none !important; }
+  .sol-connect-btn{
+    margin-top:10px; width:100%; padding:10px; border-radius:10px;
+    border:1px solid rgba(171,159,242,0.45); color:#d9d3ff;
+    background:linear-gradient(180deg, rgba(171,159,242,0.22), rgba(171,159,242,0.10));
+    font-family:'Space Grotesk',sans-serif; font-size:12.5px; font-weight:700; letter-spacing:0.4px; cursor:pointer;
+    transition:transform .15s cubic-bezier(.2,.8,.2,1), border-color .2s ease, box-shadow .2s ease;
+  }
+  .sol-connect-btn:hover{ transform:translateY(-1px); border-color:rgba(171,159,242,0.8); box-shadow:0 0 16px rgba(171,159,242,0.25); }
+  .sol-connect-btn:disabled{ opacity:0.6; cursor:wait; transform:none; }
+  .sol-note{ margin-top:8px; font-size:10.5px; line-height:1.5; color:var(--dim); text-align:center; }
+  .sol-note.err{ color:var(--ruby); }
+  .sol-panel{ margin-top:10px; border-top:1px solid var(--hairline); padding-top:10px; }
+  .sol-row{ display:flex; justify-content:space-between; align-items:baseline; padding:2px 0; }
+  .sol-key{ font-size:10.5px; letter-spacing:1.2px; text-transform:uppercase; color:var(--dim); font-weight:600; }
+  .sol-val{ font-family:'JetBrains Mono',monospace; font-weight:800; font-size:13.5px; color:var(--white-muted); }
+  .sol-val.usd{ color:var(--gold-bright); }
+  .sol-addr{ margin-top:4px; font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--dim); text-align:right; }
+  .sol-actions{ display:flex; gap:8px; margin-top:10px; }
+  .sol-actions button{
+    flex:1; padding:9px 8px; border-radius:9px; border:1px solid rgba(255,255,255,0.1);
+    background:rgba(255,255,255,0.05); color:var(--white-muted); cursor:pointer;
+    font-family:'Space Grotesk',sans-serif; font-size:12px; font-weight:700; letter-spacing:0.3px;
+    transition:transform .15s ease, background .2s ease, border-color .2s ease;
+  }
+  .sol-actions button:hover{ transform:translateY(-1px); background:rgba(255,255,255,0.09); border-color:rgba(240,194,74,0.35); }
+  .sol-link{
+    display:block; margin:8px auto 0; background:none; border:none; cursor:pointer;
+    font-family:'Space Grotesk',sans-serif; font-size:10.5px; color:var(--dim); text-decoration:underline;
+  }
+
+  .sol-modal{
+    position:fixed; inset:0; z-index:40; display:flex; align-items:center; justify-content:center; padding:16px;
+    background:rgba(5,8,6,0.78); backdrop-filter:blur(4px);
+  }
+  .sol-modal.hidden{ display:none; }
+  .sol-box{
+    position:relative; width:100%; max-width:360px; padding:26px 22px 20px; text-align:center;
+    background:linear-gradient(160deg, #1a2224, #12181a); border:1px solid var(--panel-border); border-radius:18px;
+    box-shadow:0 24px 60px rgba(0,0,0,0.6);
+  }
+  .sol-x{
+    position:absolute; top:8px; right:10px; width:30px; height:30px; border:none; background:none;
+    color:var(--dim); font-size:22px; cursor:pointer; line-height:1;
+  }
+  .sol-x:hover{ color:var(--white-muted); }
+  .sol-title{ font-family:'Anton',sans-serif; font-size:20px; letter-spacing:2px; text-transform:uppercase; color:var(--gold-bright); }
+  .sol-sub{ margin-top:6px; font-size:11px; color:var(--dim); letter-spacing:0.3px; line-height:1.5; }
+  #depositQr{ display:block; margin:14px auto 0; width:200px; height:200px; border-radius:12px; background:#fff; padding:8px; }
+  .sol-addrbox{
+    margin-top:12px; padding:10px 12px; border-radius:10px; background:rgba(255,255,255,0.04); border:1px solid var(--hairline);
+    font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--white-muted); word-break:break-all;
+    -webkit-user-select:text; user-select:text;
+  }
+  .sol-hint{ margin-top:10px; font-size:10.5px; color:var(--dim); line-height:1.55; }
+  .sol-field{
+    margin-top:14px; display:flex; align-items:center; background:rgba(255,255,255,0.04);
+    border:1px solid var(--hairline); border-radius:10px; padding:0 6px 0 14px;
+  }
+  .sol-field:focus-within{ border-color:rgba(240,194,74,0.5); box-shadow:0 0 0 3px rgba(240,194,74,0.1); }
+  #withdrawAmount{
+    flex:1; min-width:0; padding:12px 8px; font-size:16px; font-family:'JetBrains Mono',monospace; font-weight:700;
+    background:transparent; border:none; outline:none; color:var(--gold-bright);
+    -moz-appearance:textfield; appearance:textfield;
+  }
+  #withdrawAmount::-webkit-outer-spin-button, #withdrawAmount::-webkit-inner-spin-button{ -webkit-appearance:none; appearance:none; margin:0; }
+  .sol-unit{ font-size:11px; color:var(--dim); font-weight:600; padding-right:6px; }
+  .sol-max{
+    border:none; border-radius:7px; padding:6px 10px; cursor:pointer; background:rgba(240,194,74,0.14); color:var(--gold-bright);
+    font-family:'Space Grotesk',sans-serif; font-size:10.5px; font-weight:700; letter-spacing:0.6px;
+  }
+  .sol-avail{ margin-top:8px; display:flex; justify-content:space-between; font-size:11px; color:var(--dim); }
+  .sol-avail b{ font-family:'JetBrains Mono',monospace; color:var(--white-muted); font-weight:700; }
+  .sol-status{ margin-top:10px; min-height:16px; font-size:11px; line-height:1.5; color:var(--dim); word-break:break-word; }
+  .sol-status.err{ color:var(--ruby); }
+  .sol-status.ok{ color:#6fcf97; }
+  .sol-status a{ color:var(--gold-bright); }
+
+  #solToast{
+    position:fixed; left:50%; bottom:28px; z-index:60; max-width:90vw; padding:10px 18px; border-radius:999px;
+    background:rgba(18,24,26,0.96); border:1px solid rgba(240,194,74,0.45); color:var(--gold-bright);
+    font-family:'JetBrains Mono',monospace; font-size:12.5px; font-weight:700; box-shadow:0 10px 26px rgba(0,0,0,0.5);
+    opacity:0; transform:translate(-50%, 12px); pointer-events:none; transition:opacity .25s ease, transform .25s ease;
+  }
+  #solToast.show{ opacity:1; transform:translate(-50%, 0); }
 </style>
 </head>
 <body>
@@ -363,12 +452,25 @@
 
     <div class="wallet-card">
       <div class="wallet-top">
-        <span class="wallet-label">Your Earnings</span>
+        <span class="wallet-label" id="walletLabel">Your Earnings</span>
         <span id="walletAmount">$0.00</span>
       </div>
-      <div class="wallet-sub">Practice balance, saved on this device</div>
+      <div class="wallet-sub" id="walletSub">Practice balance, saved on this device</div>
       <div id="walletHistory" class="wallet-history"></div>
-      <button class="wallet-withdraw" id="withdrawBtn" disabled>Withdraw &mdash; coming soon</button>
+
+      <button type="button" class="sol-connect-btn" id="solConnectBtn">Connect Phantom</button>
+      <div class="sol-note" id="solNote">Devnet only &middot; connect to play with deposited SOL</div>
+
+      <div class="sol-panel sol-hidden" id="solPanel">
+        <div class="sol-row"><span class="sol-key">SOL balance</span><span class="sol-val" id="solBalance">0.0000 SOL</span></div>
+        <div class="sol-row"><span class="sol-key">USD equivalent</span><span class="sol-val usd" id="solUsd">$0.00</span></div>
+        <div class="sol-addr" id="solWalletAddr"></div>
+        <div class="sol-actions">
+          <button type="button" id="solDepositBtn">Deposit</button>
+          <button type="button" id="solWithdrawBtn">Withdraw</button>
+        </div>
+        <button type="button" class="sol-link" id="solDisconnectBtn">Disconnect wallet</button>
+      </div>
     </div>
 
     <div class="buyin-wrap">
@@ -431,6 +533,38 @@
     <button class="btn btn-ghost" id="againBtn">Back to Main Menu</button>
   </div>
 </div>
+
+<!-- Solana: deposit modal -->
+<div id="depositModal" class="sol-modal hidden">
+  <div class="sol-box">
+    <button type="button" class="sol-x" data-sol-close aria-label="Close">&times;</button>
+    <div class="sol-title">Deposit SOL</div>
+    <div class="sol-sub">Devnet only &middot; minimum <span id="depositMin">0.01</span> SOL &middot; 1 SOL = $<span id="depositRate">100</span></div>
+    <img id="depositQr" alt="Deposit address QR code" width="200" height="200">
+    <div class="sol-addrbox" id="depositAddr">Loading&hellip;</div>
+    <button type="button" class="btn btn-gold" id="depositCopyBtn" style="margin-top:12px;">Copy address</button>
+    <div class="sol-hint">Send devnet SOL to this address from any wallet (switch Phantom to Devnet in its developer settings). Your balance updates within about a minute.</div>
+  </div>
+</div>
+
+<!-- Solana: withdraw modal -->
+<div id="withdrawModal" class="sol-modal hidden">
+  <div class="sol-box">
+    <button type="button" class="sol-x" data-sol-close aria-label="Close">&times;</button>
+    <div class="sol-title">Withdraw SOL</div>
+    <div class="sol-sub">Sent to your connected wallet<br><span id="withdrawDest" style="font-family:'JetBrains Mono',monospace;"></span></div>
+    <div class="sol-field">
+      <input id="withdrawAmount" type="number" min="0.001" step="0.001" placeholder="0.00" inputmode="decimal">
+      <span class="sol-unit">SOL</span>
+      <button type="button" class="sol-max" id="withdrawMaxBtn">MAX</button>
+    </div>
+    <div class="sol-avail"><span>Available</span><b id="withdrawAvail">0.0000 SOL</b></div>
+    <button type="button" class="btn btn-gold" id="withdrawConfirmBtn" style="margin-top:14px;">Withdraw</button>
+    <div class="sol-status" id="withdrawStatus"></div>
+  </div>
+</div>
+
+<div id="solToast"></div>
 
 <script>
 (function(){
@@ -560,6 +694,8 @@ resize();
 /* ============================== WALLET / EARNINGS ============================== */
 let wallet = 0;
 let history = [];
+// Server-side (Phantom / devnet) balance. Only meaningful while SOL.connected.
+const SOL = { connected:false, provider:null, publicKey:null, playerId:null, rate:100, sol:0, credits:0, known:false, pollTimer:null };
 
 function loadWallet(){
   try{ const v = parseFloat(localStorage.getItem('sc_wallet_v1')); if(!isNaN(v)) return v; }catch(e){}
@@ -578,7 +714,7 @@ function pushHistory(entry){
 }
 function renderWalletUI(){
   const amt = document.getElementById('walletAmount');
-  if(amt) amt.textContent = '$'+wallet.toFixed(2);
+  if(amt) amt.textContent = '$'+(SOL.connected ? SOL.credits : wallet).toFixed(2);
   const list = document.getElementById('walletHistory');
   if(!list) return;
   list.innerHTML = '';
@@ -1436,11 +1572,18 @@ function connectAndJoin(name, buyin, skinIndex){
     const failTimer = setTimeout(()=>{ reject(new Error('Connection timed out')); }, 6000);
 
     sock.addEventListener('open', ()=>{
-      sock.send(JSON.stringify({ t:'join', name, buyin, skinIndex }));
+      sock.send(JSON.stringify({ t:'join', name, buyin, skinIndex, walletId: SOL.connected ? SOL.playerId : undefined }));
     });
     sock.addEventListener('message', (ev)=>{
       let msg;
       try{ msg = JSON.parse(ev.data); }catch(e){ return; }
+      if(msg.t === 'error'){
+        clearTimeout(failTimer);
+        const err = new Error(msg.message || 'The server rejected the join');
+        err.fromServer = true;
+        reject(err);
+        return;
+      }
       if(msg.t === 'welcome'){
         clearTimeout(failTimer);
         netYouId = msg.id;
@@ -1671,8 +1814,7 @@ function finalizeNetDeathScreen(){
 
 function handleNetCashout(msg){
   running = false;
-  wallet += msg.amount;
-  saveWallet();
+  if(!SOL.connected){ wallet += msg.amount; saveWallet(); } // wallet mode: the server already credited the balance
   pushHistory({ buyin: msg.buyin, result: msg.amount, net: msg.amount - msg.buyin, ts: Date.now() });
 
   document.getElementById('cashoutBestRank').textContent = '#' + msg.bestRank;
@@ -1685,6 +1827,7 @@ function handleNetCashout(msg){
   boostBtn.style.display = 'none';
   switchOverlay(null, cashoutScreen);
   netDisconnect();
+  solRefreshBalance();
 }
 
 function handleDisconnect(){
@@ -1728,6 +1871,11 @@ async function startGame(){
   buyin = clamp(buyin, CFG.MIN_BUYIN, CFG.MAX_BUYIN);
   buyinInput.value = buyin;
 
+  if(SOL.connected && buyin > SOL.credits + 1e-9){
+    alert('Not enough balance for a $' + buyin.toFixed(2) + ' buy-in. You have $' + SOL.credits.toFixed(2) + '. Deposit devnet SOL first.');
+    return;
+  }
+
   playBtn.disabled = true;
   playBtn.textContent = 'Connecting...';
   try{
@@ -1735,12 +1883,14 @@ async function startGame(){
   }catch(err){
     playBtn.disabled = false;
     playBtn.textContent = 'Buy In & Play';
+    if(err.fromServer){ alert(err.message); netDisconnect(); solRefreshBalance(); return; }
     alert('Could not connect to the game server.\n\nMake sure the server is running (node index.js) and you opened this page from that server (e.g. http://localhost:8787), not by double-clicking the file.\n\nDetails: ' + err.message);
     netDisconnect();
     return;
   }
   playBtn.disabled = false;
   playBtn.textContent = 'Buy In & Play';
+  solRefreshBalance(); // the buy-in has just come out of the server balance
 
   world = { snakes: [], orbs: [], particles: [], grid: new Map(), elapsed: 0 };
   netSnakes.clear();
@@ -1774,6 +1924,7 @@ function goToMenu(fromEl){
   deathVeil.style.opacity = 0;
   switchOverlay(fromEl || null, startScreen, nameInput);
   renderWalletUI();
+  solRefreshBalance();
   startMiniPreview();
   startMenuBg();
 }
@@ -1814,6 +1965,251 @@ function performCashOut(){
 }
 cashoutMenuBtn.addEventListener('click', ()=> goToMenu(cashoutScreen));
 
+/* ============================== SOLANA WALLET (devnet) ============================== */
+/* The server holds the real balance. Everything below only displays it, asks the
+   server to change it (deposit address, withdraw), or proves wallet ownership to
+   get a playerId. Nothing here is trusted for amounts. */
+const solConnectBtn = document.getElementById('solConnectBtn');
+const solNote = document.getElementById('solNote');
+const solPanel = document.getElementById('solPanel');
+const solToastEl = document.getElementById('solToast');
+const depositModal = document.getElementById('depositModal');
+const withdrawModal = document.getElementById('withdrawModal');
+const withdrawAmount = document.getElementById('withdrawAmount');
+const withdrawStatus = document.getElementById('withdrawStatus');
+const withdrawConfirmBtn = document.getElementById('withdrawConfirmBtn');
+
+let solToastTimer = null;
+let withdrawKey = null;       // idempotency key for the withdrawal currently on screen
+let withdrawBusy = false;
+
+function solProvider(){
+  const p = (window.phantom && window.phantom.solana) || window.solana;
+  return (p && p.isPhantom) ? p : null;
+}
+function solToast(text){
+  solToastEl.textContent = text;
+  solToastEl.classList.add('show');
+  clearTimeout(solToastTimer);
+  solToastTimer = setTimeout(()=> solToastEl.classList.remove('show'), 4200);
+}
+function solSetNote(text, isErr){
+  solNote.textContent = text;
+  solNote.classList.toggle('err', !!isErr);
+}
+function solShort(addr){ return addr ? addr.slice(0,4) + '…' + addr.slice(-4) : ''; }
+function solNewKey(){
+  if(window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  const b = new Uint8Array(16); crypto.getRandomValues(b);
+  return Array.from(b, x=>x.toString(16).padStart(2,'0')).join('');
+}
+
+async function solApi(path, opts){
+  const headers = { 'Content-Type': 'application/json' };
+  if(SOL.playerId) headers['X-Player-Id'] = SOL.playerId; // header, not the URL, so the id stays out of access logs
+  const res = await fetch(path, Object.assign({ headers }, opts || {}));
+  let data = {};
+  try{ data = await res.json(); }catch(e){}
+  if(!res.ok){
+    const err = new Error(data.error || ('Request failed (' + res.status + ')'));
+    err.status = res.status; err.data = data;
+    throw err;
+  }
+  return data;
+}
+
+function solUpdateUI(){
+  const on = SOL.connected;
+  solConnectBtn.classList.toggle('sol-hidden', on);
+  solNote.classList.toggle('sol-hidden', on && !solNote.classList.contains('err'));
+  solPanel.classList.toggle('sol-hidden', !on);
+  document.getElementById('walletLabel').textContent = on ? 'Wallet Balance' : 'Your Earnings';
+  document.getElementById('walletSub').textContent = on ? 'Devnet SOL held by the game server' : 'Practice balance, saved on this device';
+  if(on){
+    document.getElementById('solBalance').textContent = SOL.sol.toFixed(4) + ' SOL';
+    document.getElementById('solUsd').textContent = '$' + SOL.credits.toFixed(2);
+    document.getElementById('solWalletAddr').textContent = solShort(SOL.publicKey);
+    document.getElementById('withdrawAvail').textContent = SOL.sol.toFixed(4) + ' SOL';
+  }
+  renderWalletUI();
+}
+
+function solApplyBalance(b){
+  const gained = SOL.known ? b.sol - SOL.sol : 0;
+  SOL.sol = b.sol; SOL.credits = b.credits; SOL.known = true;
+  if(gained > 1e-9) solToast('Balance up +' + gained.toFixed(4) + ' SOL ($' + (gained * SOL.rate).toFixed(2) + ')');
+  solUpdateUI();
+}
+
+async function solRefreshBalance(){
+  if(!SOL.connected) return;
+  try{ solApplyBalance(await solApi('/api/player-balance')); }
+  catch(e){
+    if(e.status === 401){ solReset('Session expired — reconnect your wallet.'); }
+    // any other failure: keep showing the last balance and try again on the next poll
+  }
+}
+
+function solReset(message){
+  SOL.connected = false; SOL.playerId = null; SOL.publicKey = null; SOL.known = false;
+  SOL.sol = 0; SOL.credits = 0;
+  clearInterval(SOL.pollTimer); SOL.pollTimer = null;
+  depositModal.classList.add('hidden');
+  withdrawModal.classList.add('hidden');
+  solSetNote(message || 'Devnet only · connect to play with deposited SOL', !!message);
+  solUpdateUI();
+}
+
+async function solConnect(){
+  const provider = solProvider();
+  if(!provider){
+    solSetNote('Phantom not found. Install it from phantom.app, switch it to Devnet, then reload this page.', true);
+    solUpdateUI();
+    return;
+  }
+  solConnectBtn.disabled = true;
+  solConnectBtn.textContent = 'Connecting…';
+  try{
+    const resp = await provider.connect();
+    const publicKey = resp.publicKey.toString();
+    // Prove ownership of the wallet: the server issues a one-time message, Phantom signs it.
+    const challenge = await solApi('/api/login-challenge?publicKey=' + encodeURIComponent(publicKey));
+    const signed = await provider.signMessage(new TextEncoder().encode(challenge.message), 'utf8');
+    const signature = btoa(String.fromCharCode.apply(null, Array.from(signed.signature)));
+    const login = await solApi('/api/login', { method: 'POST', body: JSON.stringify({ publicKey, message: challenge.message, signature }) });
+
+    SOL.provider = provider;
+    SOL.publicKey = publicKey;
+    SOL.playerId = login.playerId;
+    SOL.rate = login.rate || SOL.rate;
+    SOL.connected = true;
+    SOL.known = false;
+    solSetNote('');
+    solApplyBalance(login);
+    clearInterval(SOL.pollTimer);
+    SOL.pollTimer = setInterval(()=>{ if(!document.hidden) solRefreshBalance(); }, 10000);
+  }catch(e){
+    const rejected = e && (e.code === 4001 || /reject|denied|cancel/i.test(e.message || ''));
+    solReset(rejected ? 'Connection cancelled in Phantom.' : ('Could not connect: ' + (e.message || 'unknown error')));
+  }finally{
+    solConnectBtn.disabled = false;
+    solConnectBtn.textContent = 'Connect Phantom';
+  }
+}
+
+async function solDisconnect(){
+  try{ if(SOL.provider) await SOL.provider.disconnect(); }catch(e){}
+  solReset();
+}
+
+/* ---------- Deposit modal ---------- */
+async function solOpenDeposit(){
+  const addrEl = document.getElementById('depositAddr');
+  const qr = document.getElementById('depositQr');
+  addrEl.textContent = 'Loading…';
+  qr.removeAttribute('src');
+  depositModal.classList.remove('hidden');
+  try{
+    const d = await solApi('/api/player-deposit-address');
+    addrEl.textContent = d.address;
+    qr.src = 'https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=0&data=' + encodeURIComponent(d.address);
+    document.getElementById('depositMin').textContent = d.minDepositSol;
+    document.getElementById('depositRate').textContent = d.rate;
+    SOL.rate = d.rate || SOL.rate;
+    solApplyBalance({ sol: d.solBalance, credits: d.balance });
+  }catch(e){
+    addrEl.textContent = 'Could not load your deposit address: ' + e.message;
+  }
+}
+async function solCopyAddress(){
+  const text = document.getElementById('depositAddr').textContent;
+  const btn = document.getElementById('depositCopyBtn');
+  let ok = false;
+  try{ await navigator.clipboard.writeText(text); ok = true; }catch(e){
+    try{
+      const range = document.createRange(); range.selectNodeContents(document.getElementById('depositAddr'));
+      const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+      ok = document.execCommand('copy'); sel.removeAllRanges();
+    }catch(e2){}
+  }
+  btn.textContent = ok ? 'Copied!' : 'Press Ctrl+C to copy';
+  setTimeout(()=>{ btn.textContent = 'Copy address'; }, 1800);
+}
+
+/* ---------- Withdraw modal ---------- */
+function solSetWithdrawStatus(html, cls){
+  withdrawStatus.className = 'sol-status' + (cls ? ' ' + cls : '');
+  withdrawStatus.innerHTML = html;
+}
+function solOpenWithdraw(){
+  withdrawKey = solNewKey();
+  withdrawAmount.value = '';
+  solSetWithdrawStatus('');
+  document.getElementById('withdrawDest').textContent = solShort(SOL.publicKey);
+  document.getElementById('withdrawAvail').textContent = SOL.sol.toFixed(4) + ' SOL';
+  withdrawModal.classList.remove('hidden');
+  solRefreshBalance();
+}
+async function solSubmitWithdraw(){
+  if(withdrawBusy) return;
+  const amount = parseFloat(withdrawAmount.value);
+  if(!isFinite(amount) || amount <= 0){ solSetWithdrawStatus('Enter an amount to withdraw.', 'err'); return; }
+  if(amount > SOL.sol + 1e-9){ solSetWithdrawStatus('That is more than your available balance.', 'err'); return; }
+
+  withdrawBusy = true;
+  withdrawConfirmBtn.disabled = true;
+  withdrawConfirmBtn.textContent = 'Sending…';
+  solSetWithdrawStatus('Sending… this can take up to a minute.');
+  let rotateKey = false; // only after the server has given a definitive answer
+  try{
+    const r = await solApi('/api/withdraw', {
+      method: 'POST',
+      body: JSON.stringify({ playerAddress: SOL.publicKey, solAmount: amount, playerId: SOL.playerId, idempotencyKey: withdrawKey }),
+    });
+    if(r.status === 'completed'){
+      rotateKey = true;
+      const link = 'https://explorer.solana.com/tx/' + encodeURIComponent(r.signature) + '?cluster=devnet';
+      solSetWithdrawStatus('Sent ' + r.sol.toFixed(4) + ' SOL. <a href="' + link + '" target="_blank" rel="noopener">View transaction</a>', 'ok');
+      solToast('Withdrew ' + r.sol.toFixed(4) + ' SOL');
+      withdrawAmount.value = '';
+    }else{
+      solSetWithdrawStatus('Still processing — it will settle on its own. Your balance updates when it does.');
+    }
+  }catch(e){
+    if(e.status){ rotateKey = true; solSetWithdrawStatus(e.message, 'err'); } // server answered: this attempt is over (refunded if it had been deducted)
+    else solSetWithdrawStatus('Could not reach the server. If you try again it will not pay twice.', 'err');
+  }finally{
+    if(rotateKey) withdrawKey = solNewKey();
+    withdrawBusy = false;
+    withdrawConfirmBtn.disabled = false;
+    withdrawConfirmBtn.textContent = 'Withdraw';
+    solRefreshBalance();
+  }
+}
+
+function solInit(){
+  solConnectBtn.addEventListener('click', solConnect);
+  document.getElementById('solDisconnectBtn').addEventListener('click', solDisconnect);
+  document.getElementById('solDepositBtn').addEventListener('click', solOpenDeposit);
+  document.getElementById('solWithdrawBtn').addEventListener('click', solOpenWithdraw);
+  document.getElementById('depositCopyBtn').addEventListener('click', solCopyAddress);
+  withdrawConfirmBtn.addEventListener('click', solSubmitWithdraw);
+  document.getElementById('withdrawMaxBtn').addEventListener('click', ()=>{
+    withdrawAmount.value = String(Math.floor(SOL.sol * 1e9) / 1e9);
+  });
+  withdrawAmount.addEventListener('keydown', (e)=>{ if(e.key === 'Enter') solSubmitWithdraw(); });
+  [depositModal, withdrawModal].forEach(m=>{
+    m.addEventListener('click', (e)=>{ if(e.target === m || e.target.hasAttribute('data-sol-close')) m.classList.add('hidden'); });
+  });
+
+  const provider = solProvider();
+  if(provider && provider.on){
+    provider.on('disconnect', ()=>{ if(SOL.connected) solReset(); });
+    provider.on('accountChanged', ()=>{ if(SOL.connected) solReset('Wallet changed — reconnect to continue.'); });
+  }
+  solUpdateUI();
+}
+
 /* ============================== LOADING SCREEN ============================== */
 function runLoadingScreen(){
   document.getElementById('loadingTip').textContent = LOADING_TIPS[(Math.random()*LOADING_TIPS.length)|0];
@@ -1844,6 +2240,7 @@ function runLoadingScreen(){
 wallet = loadWallet();
 history = loadHistory();
 renderWalletUI();
+solInit();
 runLoadingScreen();
 
 })();

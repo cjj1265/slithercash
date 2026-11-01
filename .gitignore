@@ -1,0 +1,8 @@
+node_modules/
+
+# Wallet state and secrets — balances, the audit ledger and env files must never be committed.
+wallet-data.json
+wallet-data.json.tmp
+*.ledger.jsonl
+.env
+.env.*
