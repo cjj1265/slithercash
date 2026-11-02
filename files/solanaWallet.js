@@ -80,6 +80,17 @@ const ALERT_URL = process.env.ALERT_WEBHOOK_URL || '';
 // The house fee: this percent of a cash-out's PROFIT (what it is worth above the buy-in). Cashing out
 // at or below the buy-in costs nothing, and the stake itself is never touched. 0 turns it off.
 const RAKE_PERCENT = (() => { const n = Number(process.env.RAKE_PERCENT); return Number.isFinite(n) && n >= 0 && n <= 50 ? n : 5; })();
+
+// The only address house earnings can ever be sent to. It comes from the environment, never from a request,
+// so someone who got hold of the admin token still cannot redirect the money anywhere else.
+const OWNER_ADDRESS = (() => {
+  const v = process.env.OWNER_ADDRESS;
+  if (!v) return null;
+  try { return new PublicKey(v).toBase58(); }
+  catch (e) { console.error('[wallet] OWNER_ADDRESS is not a valid address: earnings withdrawals are disabled'); return null; }
+})();
+// After taking earnings the game wallet must still hold this much more than it owes players.
+const EARNINGS_RESERVE_LAMPORTS = Math.round(envNum('EARNINGS_RESERVE_SOL', 0.005) * LAMPORTS_PER_SOL);
 const MAX_CHALLENGES = 5000;
 
 class WalletError extends Error {
@@ -101,7 +112,8 @@ let polling = false;
 
 // Persisted. players[playerId] = { owner, address, lamports, lastSig, needsSweep, createdAt }
 // withdrawals[`${playerId}:${idempotencyKey}`] = { ..., status: pending|sending|completed|refunded }
-let store = { version: 1, players: {}, processedSignatures: [], withdrawals: {}, paused: null, feesLamports: 0, rakeLamports: 0 };
+let store = { version: 1, players: {}, processedSignatures: [], withdrawals: {}, paused: null, feesLamports: 0, rakeLamports: 0, earningsTakenLamports: 0 };
+let earningsBusy = false;               // one earnings withdrawal at a time
 const GENESIS_NETWORKS = {
   'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG': 'devnet',
   '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d': 'mainnet-beta',
@@ -134,6 +146,7 @@ function loadStore() {
     paused: parsed.paused || null,
     feesLamports: parsed.feesLamports || 0,
     rakeLamports: parsed.rakeLamports || 0,
+    earningsTakenLamports: parsed.earningsTakenLamports || 0,
   };
   for (const sig of store.processedSignatures) processed.add(sig);
 }
@@ -419,7 +432,10 @@ async function computeSolvency() {
   let balances = 0;
   for (const p of Object.values(store.players)) balances += p.lamports;
   let inflightLamports = 0;
-  for (const rec of Object.values(store.withdrawals)) if (rec.status === 'pending' || rec.status === 'sending') inflightLamports += rec.lamports;
+  // Earnings leaving the wallet are the house's own money, not owed to a player, so they are not counted here.
+  for (const rec of Object.values(store.withdrawals)) {
+    if (rec.kind !== 'earnings' && (rec.status === 'pending' || rec.status === 'sending')) inflightLamports += rec.lamports;
+  }
   const inPlayLamports = Math.ceil(inPlayProvider() / CREDITS_PER_SOL * LAMPORTS_PER_SOL);
 
   const assets = houseLamports + unsweptLamports;
@@ -464,7 +480,7 @@ async function getAdminStatus() {
     .slice(0, 200);
   const unsettled = Object.values(store.withdrawals)
     .filter((r) => r.status === 'pending' || r.status === 'sending')
-    .map((r) => ({ to: r.to, sol: lamportsToSol(r.lamports), status: r.status, signature: r.signature, ageSec: Math.round((Date.now() - r.createdAt) / 1000) }));
+    .map((r) => ({ kind: r.kind || 'player', to: r.to, sol: lamportsToSol(r.lamports), status: r.status, signature: r.signature, ageSec: Math.round((Date.now() - r.createdAt) / 1000) }));
 
   let recent = [];
   try {
@@ -497,7 +513,17 @@ async function getAdminStatus() {
       lowWalletSol: lamportsToSol(LIMITS.lowWalletLamports),
       toleranceSol: lamportsToSol(LIMITS.insolvencyToleranceLamports),
     },
-    earnings: { feesCollectedSol: lamportsToSol(store.rakeLamports), rakePercent: RAKE_PERCENT, networkCostsSol: lamportsToSol(store.feesLamports) },
+    earnings: {
+      feesCollectedSol: lamportsToSol(store.rakeLamports),
+      takenSol: lamportsToSol(store.earningsTakenLamports),
+      availableSol: lamportsToSol(store.rakeLamports - store.earningsTakenLamports),
+      // what could be taken this minute: the lesser of the fees available and the wallet's room above what it owes
+      maxNowSol: lamportsToSol(Math.max(0, Math.min(store.rakeLamports - store.earningsTakenLamports, solvency.surplusLamports - EARNINGS_RESERVE_LAMPORTS))),
+      reserveSol: lamportsToSol(EARNINGS_RESERVE_LAMPORTS),
+      ownerAddress: OWNER_ADDRESS,
+      rakePercent: RAKE_PERCENT,
+      networkCostsSol: lamportsToSol(store.feesLamports),
+    },
     withdrawnLast24hSol: lamportsToSol(out.total),
     playerCount: Object.keys(store.players).length,
     alertsConfigured: !!ALERT_URL,
@@ -526,18 +552,24 @@ function completeWithdrawal(rec) {
   rec.updatedAt = Date.now();
   store.feesLamports += TX_FEE_LAMPORTS; // the game wallet pays this on top of the amount
   save();
+  if (rec.kind === 'earnings') {
+    ledger('earnings_ok', { to: rec.to, lamports: rec.lamports, sol: lamportsToSol(rec.lamports), signature: rec.signature });
+    sendAlert('earnings-ok:' + rec.signature, 'House earnings withdrawn: ' + lamportsToSol(rec.lamports) + ' SOL sent to the owner address (' + rec.signature + ')', 0);
+    return;
+  }
   ledger('withdraw_ok', { playerId: rec.playerId, to: rec.to, lamports: rec.lamports, signature: rec.signature });
 }
 
 function refundWithdrawal(rec, reason) {
   if (rec.status !== 'pending' && rec.status !== 'sending') return;
-  const player = store.players[rec.playerId];
-  player.lamports += rec.lamports;
+  if (rec.kind === 'earnings') store.earningsTakenLamports -= rec.lamports; // the earnings are available again
+  else store.players[rec.playerId].lamports += rec.lamports;
   rec.status = 'refunded';
   rec.error = String(reason).slice(0, 200);
   rec.updatedAt = Date.now();
   save();
-  ledger('withdraw_refund', { playerId: rec.playerId, to: rec.to, lamports: rec.lamports, signature: rec.signature, reason: rec.error });
+  ledger(rec.kind === 'earnings' ? 'earnings_refund' : 'withdraw_refund',
+    { playerId: rec.playerId, to: rec.to, lamports: rec.lamports, signature: rec.signature, reason: rec.error });
 }
 
 /**
@@ -664,12 +696,79 @@ async function withdraw(playerAddress, solAmount, opts) {
   return withdrawalResult(rec, player);
 }
 
+function earningsResult(rec) {
+  return { status: rec.status, signature: rec.signature || null, to: rec.to, lamports: rec.lamports, sol: lamportsToSol(rec.lamports), error: rec.error || null };
+}
+
+/**
+ * Send house earnings to OWNER_ADDRESS, and nowhere else. The rules, in order:
+ *   - only fees actually collected (rakeLamports) that have not been taken yet are available;
+ *   - the wallet must be solvent right now, judged from a fresh look at the chain;
+ *   - afterwards it must still hold at least EARNINGS_RESERVE more than it owes players;
+ *   - the site must not be paused (resume first), and one earnings withdrawal runs at a time.
+ * It then uses the same crash-safe flow as player withdrawals (signature persisted before broadcast, refund
+ * only when the chain proves failure) and is idempotent per key.
+ */
+async function withdrawEarnings(solAmount, idempotencyKey) {
+  requireEnabled();
+  if (!OWNER_ADDRESS) throw new WalletError('owner_not_configured', 'OWNER_ADDRESS is not set on the server, so earnings cannot be withdrawn', 400);
+  if (typeof idempotencyKey !== 'string' || !/^[A-Za-z0-9_-]{8,64}$/.test(idempotencyKey)) {
+    throw new WalletError('bad_idempotency_key', 'Missing or invalid idempotencyKey');
+  }
+  const lamports = solToLamports(solAmount);
+  if (lamports < MIN_WITHDRAW_LAMPORTS) {
+    throw new WalletError('below_minimum', 'Minimum is ' + lamportsToSol(MIN_WITHDRAW_LAMPORTS) + ' SOL');
+  }
+
+  const wkey = 'earnings:' + idempotencyKey;
+  const existing = store.withdrawals[wkey];
+  if (existing) {
+    if (existing.lamports !== lamports) throw new WalletError('idempotency_conflict', 'That idempotencyKey was already used for a different amount', 409);
+    return earningsResult(existing);
+  }
+  if (isPaused()) throw new WalletError('paused', 'The site is paused. Resume it before withdrawing earnings.', 503);
+  if (earningsBusy) throw new WalletError('busy', 'Another earnings withdrawal is in progress', 409);
+
+  earningsBusy = true;
+  try {
+    const available = () => store.rakeLamports - store.earningsTakenLamports;
+    if (lamports > available()) {
+      throw new WalletError('over_earnings', 'Only ' + lamportsToSol(available()) + ' SOL of fees is available to take', 400);
+    }
+    const s = await computeSolvency();
+    if (!s.ok) throw new WalletError('insolvent', 'The game wallet is short of what it owes players. Earnings cannot be taken.', 409);
+    if (s.surplusLamports - lamports < EARNINGS_RESERVE_LAMPORTS) {
+      const room = Math.max(0, s.surplusLamports - EARNINGS_RESERVE_LAMPORTS);
+      throw new WalletError('over_surplus', 'That would leave the game wallet too close to what it owes players. At most ' + lamportsToSol(room) + ' SOL can be taken right now.', 400);
+    }
+    // The RPC calls above took time: re-check anything that could have changed meanwhile.
+    if (store.withdrawals[wkey] || isPaused() || lamports > available()) {
+      throw new WalletError('state_changed', 'Something changed while checking, please try again', 409);
+    }
+
+    store.earningsTakenLamports += lamports; // reserved now; given back if the send fails
+    const rec = store.withdrawals[wkey] = {
+      kind: 'earnings', playerId: null, key: idempotencyKey, to: OWNER_ADDRESS, lamports,
+      status: 'pending', signature: null, lastValidBlockHeight: null, error: null, createdAt: Date.now(),
+    };
+    save();
+    ledger('earnings_start', { to: OWNER_ADDRESS, lamports, sol: lamportsToSol(lamports) });
+
+    inflight.add(wkey);
+    try { await sendWithdrawal(rec); }
+    finally { inflight.delete(wkey); }
+    return earningsResult(rec);
+  } finally {
+    earningsBusy = false;
+  }
+}
+
 /** Lamports sent (or being sent) since `since`: refunded withdrawals don't count. */
 function withdrawnSince(since) {
   const byPlayer = {};
   let total = 0;
   for (const rec of Object.values(store.withdrawals)) {
-    if (rec.createdAt < since || rec.status === 'refunded') continue;
+    if (rec.createdAt < since || rec.status === 'refunded' || rec.kind === 'earnings') continue; // the daily caps are about players' money
     byPlayer[rec.playerId] = (byPlayer[rec.playerId] || 0) + rec.lamports;
     total += rec.lamports;
   }
@@ -916,7 +1015,8 @@ async function verifyNetworkThenStart() {
   console.log('[wallet] enabled on ' + network + ' via ' + RPC_URL.replace(/\/\/([^/@]*@)?([^/?]+).*/, '//$2/…'));
   console.log('[wallet] game wallet: ' + game.publicKey.toBase58());
   console.log('[wallet] data file: ' + DATA_FILE);
-  console.log('[wallet] house fee: ' + RAKE_PERCENT + '% of cash-out profit');
+  console.log('[wallet] house fee: ' + RAKE_PERCENT + '% of cash-out profit; earnings can be withdrawn to ' +
+    (OWNER_ADDRESS ? OWNER_ADDRESS.slice(0, 4) + '…' + OWNER_ADDRESS.slice(-4) : 'nowhere (OWNER_ADDRESS not set)'));
   console.log('[wallet] limits: withdraw ' + lamportsToSol(LIMITS.maxWithdrawLamports) + ' SOL each, ' +
     lamportsToSol(LIMITS.maxPlayerDailyLamports) + '/player/day, ' + lamportsToSol(LIMITS.maxGlobalDailyLamports) + '/day total; buy-in max $' + LIMITS.maxBuyinCredits);
   if (isPaused()) console.warn('[wallet] PAUSED: ' + getPauseInfo().reason);
@@ -952,6 +1052,7 @@ module.exports = {
   settleCashout,
   deductPlayer,
   withdraw,
+  withdrawEarnings,
   getGameBalance,
   getPublicLimits,
   assertCanBuyIn,

@@ -57,7 +57,17 @@
   <div class="row">
     <div class="card"><h2>Game wallet</h2><div class="big" id="houseSol">-</div><div class="mono dim" id="houseAddr"></div></div>
     <div class="card"><h2>Solvency</h2><div class="big" id="solvencyBig">-</div><div id="solvencyKv"></div></div>
-    <div class="card"><h2>House earnings</h2><div class="big" id="earnBig">-</div><div id="earnKv"></div></div>
+    <div class="card"><h2>House earnings</h2><div class="big" id="earnBig">-</div><div id="earnKv"></div>
+      <div id="earnAction" style="margin-top:10px; border-top:1px solid var(--line); padding-top:10px;">
+        <div class="dim" id="earnOwner" style="font-size:12px; margin-bottom:6px;"></div>
+        <div style="display:flex; gap:6px; flex-wrap:wrap;">
+          <input id="earnAmount" type="number" step="0.001" min="0.001" placeholder="SOL" style="width:110px;">
+          <button id="earnMaxBtn">MAX</button>
+          <button id="earnBtn" class="good">Withdraw earnings</button>
+        </div>
+        <p id="earnMsg" style="margin-top:6px; font-size:12px; word-break:break-word;"></p>
+      </div>
+    </div>
     <div class="card"><h2>Last 24 hours</h2><div class="big" id="out24">-</div><div id="limitsKv"></div></div>
   </div>
 
@@ -141,12 +151,21 @@ function render(s){
     ['Status', v.ok ? 'covered' : 'SHORT', v.ok ? 'ok' : 'bad'],
   ]);
 
-  $('earnBig').textContent = fmt(s.earnings.feesCollectedSol) + ' SOL';
+  const e = s.earnings;
+  lastEarnings = e;
+  $('earnBig').textContent = fmt(e.availableSol) + ' SOL';
   kv($('earnKv'), [
-    ['Fees collected (all time)', fmt(s.earnings.feesCollectedSol) + ' SOL'],
-    ['House fee', s.earnings.rakePercent + '% of cash-out profit'],
-    ['Network costs paid', fmt(s.earnings.networkCostsSol) + ' SOL'],
+    ['Available to take', fmt(e.availableSol) + ' SOL'],
+    ['  can be taken right now', fmt(e.maxNowSol) + ' SOL'],
+    ['Fees collected (all time)', fmt(e.feesCollectedSol) + ' SOL'],
+    ['Already taken', fmt(e.takenSol) + ' SOL'],
+    ['House fee', e.rakePercent + '% of cash-out profit'],
+    ['Network costs paid', fmt(e.networkCostsSol) + ' SOL'],
   ]);
+  $('earnOwner').textContent = e.ownerAddress
+    ? 'Sends only to ' + short(e.ownerAddress) + ' (set on the server; it cannot be changed from this page)'
+    : 'OWNER_ADDRESS is not set on the server, so earnings cannot be withdrawn.';
+  $('earnBtn').disabled = !e.ownerAddress;
 
   $('out24').textContent = fmt(s.withdrawnLast24hSol) + ' SOL';
   kv($('limitsKv'), [
@@ -205,6 +224,39 @@ async function start(){
   await refresh();
   clearInterval(timer); timer = setInterval(refresh, 10000);
 }
+/* ---- withdraw earnings ----
+   The server decides everything that matters (destination, the amount available, solvency, the reserve).
+   The key makes a double click or a retry after a network hiccup pay once. */
+let lastEarnings = null;
+let earnKey = null;
+let earnBusy = false;
+function newKey(){ return (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(36).slice(2); }
+async function withdrawEarnings(){
+  if(earnBusy || !lastEarnings) return;
+  const amount = parseFloat($('earnAmount').value);
+  const msg = $('earnMsg');
+  if(!isFinite(amount) || amount <= 0){ msg.textContent = 'Enter an amount in SOL.'; msg.className = 'bad'; return; }
+  if(!confirm('Send ' + amount + ' SOL of house earnings to ' + short(lastEarnings.ownerAddress) + '?')) return;
+  earnBusy = true; $('earnBtn').disabled = true;
+  msg.textContent = 'Sending…'; msg.className = 'dim';
+  if(!earnKey) earnKey = newKey();
+  let definitive = false;
+  try {
+    const r = await api('/admin/api/withdraw-earnings', { method: 'POST', body: JSON.stringify({ solAmount: amount, idempotencyKey: earnKey }) });
+    definitive = r.status === 'completed';
+    msg.textContent = r.status === 'completed' ? 'Sent ' + fmt(r.sol) + ' SOL. Signature: ' + r.signature : 'Still processing. It will settle by itself.';
+    msg.className = r.status === 'completed' ? 'ok' : 'dim';
+    if(definitive) $('earnAmount').value = '';
+  } catch(e) {
+    if(e.status){ definitive = true; msg.textContent = e.message; msg.className = 'bad'; }   // the server answered: this attempt is over
+    else { msg.textContent = 'Could not reach the server. Trying again with the same request will not pay twice.'; msg.className = 'bad'; }
+  } finally {
+    if(definitive) earnKey = null;
+    earnBusy = false; $('earnBtn').disabled = !(lastEarnings && lastEarnings.ownerAddress);
+    refresh();
+  }
+}
+
 async function control(path, body, okText){
   $('controlMsg').textContent = '';
   try { await api(path, { method: 'POST', body: JSON.stringify(body || {}) }); $('controlMsg').textContent = okText; $('controlMsg').className = 'ok'; refresh(); }
@@ -216,6 +268,8 @@ $('tokenInput').addEventListener('keydown', (e)=>{ if(e.key === 'Enter') signIn(
 $('signOut').addEventListener('click', ()=> signOut());
 $('pauseBtn').addEventListener('click', ()=>{ if(confirm('Pause buy-ins and withdrawals?')) control('/admin/api/pause', { paused: true, reason: $('pauseReason').value || 'manual' }, 'Paused.'); });
 $('resumeBtn').addEventListener('click', ()=> control('/admin/api/pause', { paused: false }, 'Resumed.'));
+$('earnBtn').addEventListener('click', withdrawEarnings);
+$('earnMaxBtn').addEventListener('click', ()=>{ if(lastEarnings) $('earnAmount').value = String(Math.floor(lastEarnings.maxNowSol * 1e9) / 1e9); });
 $('alertBtn').addEventListener('click', ()=> control('/admin/api/test-alert', {}, 'Test alert sent (check your channel).'));
 
 if(token) start();
