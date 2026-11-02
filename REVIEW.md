@@ -76,7 +76,7 @@ From `files/` (Node 18+, after `npm install`):
 npm run test:economy   # value conservation in the game simulation (seconds)
 npm run test:fee       # cash-out fee maths and the earnings withdrawal rules, 24 checks (seconds)
 npm run test:ws        # WebSocket attack tests against wsProtocol.js with a raw TCP client (seconds)
-npm run test:wallet    # end-to-end: 116 checks, a few minutes
+npm run test:wallet    # end-to-end: 128 checks, a few minutes
 ```
 
 `test:ws` sends exactly what a hostile client would: oversized and lying frame headers, floods, unmasked and fragmented frames, reserved bits, bad opcodes, wrong origins, too many connections, silent connections and a client that stops reading.
@@ -100,7 +100,7 @@ npm run test:wallet    # end-to-end: 116 checks, a few minutes
 - **Never run on mainnet**, and the automated tests use a simulated chain.
 - **Hot wallet.** `GAME_WALLET_SECRET` is an environment variable on the host. Whoever gets it can drain the game wallet; the app's withdrawal limits do not apply to someone holding the key. The only mitigation is keeping the balance small.
 - **Single instance only.** State lives in process memory plus one file. Two instances would double-process deposits and withdrawals. Render must run exactly one.
-- **Volumetric denial of service is not handled.** The WebSocket server now limits each connection and each IP, but a flood from many addresses still reaches one Node process. The usual answer is a CDN or proxy in front (Cloudflare or similar); Render's own edge helps somewhat. Fragmented WebSocket messages are refused by design.
+- **Volumetric denial of service** is handled by putting Cloudflare in front, not by this code. The server supports it: `TRUST_CLOUDFLARE` reads the real visitor address, and `ORIGIN_SECRET` refuses anything that did not come through Cloudflare. If `ORIGIN_SECRET` is not set while `TRUST_CLOUDFLARE` is on, a startup warning says so, because the address header could then be forged. The `onrender.com` address stays reachable only with the secret. Fragmented WebSocket messages are refused by design.
 - **No collusion or multi-account detection.** Friends can feed each other (it is only a transfer, and the fee applies to profit), and nothing stops one person running many wallets.
 - **Dust.** Deposits under 0.01 SOL are not credited but are swept into the game wallet along with the next real deposit, so the house keeps them.
 - **RPC trust.** Deposit amounts come from the RPC's answer. A malicious or buggy RPC could misreport. Finalized commitment narrows but does not remove this.
@@ -142,6 +142,8 @@ npm run test:wallet    # end-to-end: 116 checks, a few minutes
 | `WALLET_PAUSED` | unset | `1` forces the pause on. |
 | `DEPOSIT_POLL_MS` | `30000` | Deposit poll interval. |
 | `TRUST_PROXY` | unset | `1` to rate limit by `X-Forwarded-For` behind Render. |
+| `TRUST_CLOUDFLARE` | unset | `1` to use Cloudflare's `CF-Connecting-IP` as the visitor address for rate limits and connection caps. Ignored unless set, because anyone could send the header. |
+| `ORIGIN_SECRET` | none | A long random string that Cloudflare adds to every request as `X-Origin-Secret`. When set, every request without it (except `/health`) gets a 403, including game connections, so the server cannot be reached around Cloudflare and the visitor-address header cannot be forged. |
 | `CORS_ORIGIN` | none | Allowed origins for `/api` (same-origin needs none). |
 | `WITHDRAW_RATE_MAX` | `6` | Withdraw requests per player per minute. |
 | `NUM_BOTS` | `0` | Bots in the **practice** world only. |

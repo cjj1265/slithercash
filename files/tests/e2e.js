@@ -503,6 +503,47 @@ const errOf = (state) => (state.msgs.find((m) => m.t === 'error') || {}).message
   check('check-deposit is rate limited per player (20 a minute)', limited >= 1, limited);
   check('the credit is recorded in the ledger once', fs.readFileSync(odData + '.ledger.jsonl', 'utf8').split('\n').filter((l) => l.includes('"type":"deposit"')).length === 1);
 
+  console.log('\n== behind Cloudflare: real visitor address, and only Cloudflare can reach the server ==');
+  await stopServer();
+  const cfData = path.join(SP, 'e2e-wallet-data-cf.json');
+  for (const f of [cfData, cfData + '.ledger.jsonl']) fs.rmSync(f, { force: true });
+  const challengeUrl = '/api/login-challenge?publicKey=' + A.publicKey.toBase58();
+  const handshakeWith = (headers) => new Promise((resolve) => {
+    const req = http.request({ host: '127.0.0.1', port: PORT, headers: Object.assign({
+      Connection: 'Upgrade', Upgrade: 'websocket', 'Sec-WebSocket-Key': crypto.randomBytes(16).toString('base64'), 'Sec-WebSocket-Version': '13' }, headers) });
+    req.on('upgrade', (res, socket) => { socket.destroy(); resolve(101); });
+    req.on('response', (res) => { res.resume(); resolve(res.statusCode); });
+    req.on('error', () => resolve(0));
+    req.end();
+  });
+
+  // 1) By default the header must mean nothing: anyone could send it.
+  await startServer(game, cfData, {});
+  let spoofLimited = 0;
+  for (let i = 0; i < 25; i++) if ((await http_('GET', challengeUrl, null, { 'CF-Connecting-IP': '203.0.113.' + (i + 1) })).status === 429) spoofLimited++;
+  check('without TRUST_CLOUDFLARE a forged visitor-address header changes nothing (still one shared limit)', spoofLimited >= 1, spoofLimited);
+  await stopServer();
+
+  // 2) Behind Cloudflare: trust the header, and refuse anything that did not come through Cloudflare.
+  const SECRET = 'e2e-origin-secret-0123456789abcdef';
+  const viaCf = { 'X-Origin-Secret': SECRET };
+  await startServer(game, cfData, { TRUST_CLOUDFLARE: '1', ORIGIN_SECRET: SECRET });
+  check('/health stays open without the secret (the host\'s health checks)', (await http_('GET', '/health')).json.ok === true);
+  check('the page is refused without the secret (403)', (await fetch(BASE + '/')).status === 403);
+  check('the API is refused without the secret (403)', (await http_('GET', '/api/config')).status === 403);
+  check('a wrong secret is refused (403)', (await fetch(BASE + '/', { headers: { 'X-Origin-Secret': 'wrong' } })).status === 403);
+  check('the page is served with the secret', (await fetch(BASE + '/', { headers: viaCf })).status === 200);
+  check('the API works with the secret', (await http_('GET', '/api/config', null, viaCf)).status === 200);
+  check('the admin page is refused without the secret too', (await fetch(BASE + '/admin')).status === 403);
+  check('a game connection without the secret is refused (403)', (await handshakeWith({})) === 403);
+  check('a game connection with the secret is accepted', (await handshakeWith(viaCf)) === 101);
+
+  let sameLimited = 0, diffLimited = 0;
+  for (let i = 0; i < 25; i++) if ((await http_('GET', challengeUrl, null, Object.assign({ 'CF-Connecting-IP': '198.51.100.7' }, viaCf))).status === 429) sameLimited++;
+  for (let i = 0; i < 25; i++) if ((await http_('GET', challengeUrl, null, Object.assign({ 'CF-Connecting-IP': '198.51.100.' + (20 + i) }, viaCf))).status === 429) diffLimited++;
+  check('one visitor behind Cloudflare is rate limited by their real address', sameLimited >= 1, sameLimited);
+  check('25 different visitors are NOT limited together', diffLimited === 0, diffLimited);
+
   console.log('\n== network guard: the wallet only starts on a network it has verified and is allowed to use ==');
   await stopServer();
   const guardData = path.join(SP, 'e2e-wallet-data-guard.json');
