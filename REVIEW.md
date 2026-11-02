@@ -54,6 +54,8 @@ So the total value in a world (`totalValue`, `:98`) never increases. It can only
 - on a definite failure, refund; on an ambiguous one, `settleWithdrawal` (`:536`) asks the chain and refunds only if the transaction failed or its blockhash expired;
 - `reconcileWithdrawals` (`:668`) finishes anything left half-done after a crash.
 
+**7. House earnings** (`withdrawEarnings`, admin only). The fees from cash-outs stay in the game wallet as surplus; `store.rakeLamports` counts them and `store.earningsTakenLamports` counts what has been taken. The admin page can send them to **`OWNER_ADDRESS` only**, an address set in the server environment: a request carries only an amount and an idempotency key, never a destination, so a stolen admin token still cannot redirect the money. Rules, in order: only fees collected and not yet taken; the site must not be paused; the wallet must be solvent on a fresh look at the chain; afterwards it must still hold `EARNINGS_RESERVE_SOL` (default 0.005) more than it owes players; one at a time. It then uses the same crash-safe send as player withdrawals (`sendWithdrawal`: signature persisted before broadcast, refund only on proven failure), marked `kind: 'earnings'` so it is excluded from the player daily caps and from the "owed" side of the solvency check, and it raises a Discord alert when it completes.
+
 ## What protects it
 
 - **Limits** (env-configurable): $20 max buy-in; 0.2 SOL per withdrawal; 0.5 SOL per player per 24h; 2 SOL per 24h across everyone.
@@ -72,9 +74,9 @@ From `files/` (Node 18+, after `npm install`):
 
 ```
 npm run test:economy   # value conservation in the game simulation (seconds)
-npm run test:fee       # cash-out fee maths (seconds)
+npm run test:fee       # cash-out fee maths and the earnings withdrawal rules, 24 checks (seconds)
 npm run test:ws        # WebSocket attack tests against wsProtocol.js with a raw TCP client (seconds)
-npm run test:wallet    # end-to-end: 111 checks, a few minutes
+npm run test:wallet    # end-to-end: 116 checks, a few minutes
 ```
 
 `test:ws` sends exactly what a hostile client would: oversized and lying frame headers, floods, unmasked and fragmented frames, reserved bits, bad opcodes, wrong origins, too many connections, silent connections and a client that stops reading.
@@ -129,6 +131,8 @@ npm run test:wallet    # end-to-end: 111 checks, a few minutes
 | `ALERT_WEBHOOK_URL` | none | Discord or Slack webhook. Required on mainnet. |
 | `ALLOW_MAINNET` | unset | Must be `1` to run on mainnet. |
 | `RAKE_PERCENT` | `5` | House fee as a percent of cash-out profit (0 to 50). |
+| `OWNER_ADDRESS` | none | The only address house earnings can be withdrawn to. Without it the admin button is disabled. |
+| `EARNINGS_RESERVE_SOL` | `0.005` | The game wallet must still hold this much more than it owes players after an earnings withdrawal. |
 | `MAX_WITHDRAW_SOL` | `0.2` | Per withdrawal. |
 | `MAX_PLAYER_DAILY_WITHDRAW_SOL` | `0.5` | Per player, rolling 24h. |
 | `MAX_DAILY_WITHDRAW_SOL` | `2` | All players, rolling 24h. |

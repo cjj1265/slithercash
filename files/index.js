@@ -7,6 +7,7 @@
 //        practice mode only and the /api wallet routes answer 503.
 //      CORS_ORIGIN (optional, comma-separated allowlist for the /api routes)
 //      ADMIN_TOKEN (20+ chars; enables /admin), ALERT_WEBHOOK_URL (Discord/Slack alerts),
+//      OWNER_ADDRESS (the one address house earnings can be withdrawn to, from /admin),
 //      WALLET_PAUSED=1 (start paused), MAX_WITHDRAW_SOL, MAX_PLAYER_DAILY_WITHDRAW_SOL,
 //      MAX_DAILY_WITHDRAW_SOL, MAX_BUYIN_CREDITS, LOW_WALLET_SOL — see solanaWallet.js
 //      TRUST_PROXY=1 (optional, rate-limit by X-Forwarded-For behind Render/Railway)
@@ -244,6 +245,7 @@ function adminAuthorized(req) {
  *   GET  /admin                    -> the admin page
  *   GET  /admin/api/status         -> balances, solvency, limits, unsettled withdrawals, recent ledger
  *   POST /admin/api/pause { paused, reason? } -> stop / resume buy-ins and withdrawals
+ *   POST /admin/api/withdraw-earnings { solAmount, idempotencyKey } -> sends collected house fees to OWNER_ADDRESS
  *   POST /admin/api/test-alert     -> sends a test message to ALERT_WEBHOOK_URL
  */
 async function handleAdmin(req, res) {
@@ -273,6 +275,14 @@ async function handleAdmin(req, res) {
     } else if (route === 'POST /admin/api/pause') {
       const body = await readJson(req, 2048);
       sendJson(res, 200, wallet.setPaused(!!body.paused, body.reason, 'admin'));
+    } else if (route === 'POST /admin/api/withdraw-earnings') {
+      // The destination is OWNER_ADDRESS from the environment; the request only says how much.
+      if (rateLimited('admin-earnings', clientIp(req), 10, 60000)) throw new wallet.WalletError('rate_limited', 'Too many requests', 429);
+      const body = await readJson(req, 2048);
+      const r = await wallet.withdrawEarnings(body.solAmount, body.idempotencyKey);
+      if (r.status === 'completed') sendJson(res, 200, Object.assign({ ok: true }, r));
+      else if (r.status === 'refunded') sendJson(res, 502, Object.assign({ ok: false }, r));
+      else sendJson(res, 202, Object.assign({ ok: false }, r, { error: 'Still processing — it will settle on its own' }));
     } else if (route === 'POST /admin/api/test-alert') {
       wallet.sendAlert('test-alert', 'Test alert from the admin page', 0);
       sendJson(res, 200, { ok: true, configured: !!process.env.ALERT_WEBHOOK_URL });

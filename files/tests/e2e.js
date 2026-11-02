@@ -179,6 +179,9 @@ const errOf = (state) => (state.msgs.find((m) => m.t === 'error') || {}).message
   check('admin status has no bearer ids', !JSON.stringify(st0.json).includes(pidA));
   const S0 = st0.json.solvency.surplusSol;
   console.log('  baseline surplus (the house\'s own capital): ' + S0 + ' SOL');
+  const noOwner = await admin('POST', '/admin/api/withdraw-earnings', { solAmount: 0.01, idempotencyKey: 'e2e-earn-nowner1' });
+  check('earnings withdrawal is refused when OWNER_ADDRESS is not set', noOwner.status === 400 && noOwner.json.code === 'owner_not_configured', noOwner);
+  check('earnings withdrawal needs the admin token', (await http_('POST', '/admin/api/withdraw-earnings', { solAmount: 0.01, idempotencyKey: 'e2e-earn-noauth1' })).status === 401);
   for (let i = 0; i < 12; i++) await admin('GET', '/admin/api/status', null, 'y'.repeat(30));
   check('repeated bad admin tokens get rate limited', (await admin('GET', '/admin/api/status', null, 'z'.repeat(30))).status === 429);
 
@@ -419,7 +422,8 @@ const errOf = (state) => (state.msgs.find((m) => m.t === 'error') || {}).message
   await stopServer();
   const feeData = path.join(SP, 'e2e-wallet-data-fee.json');
   for (const f of [feeData, feeData + '.ledger.jsonl']) fs.rmSync(f, { force: true });
-  await startServer(game, feeData, { ADMIN_TOKEN: ADMIN });
+  const ownerKp = Keypair.generate();
+  await startServer(game, feeData, { ADMIN_TOKEN: ADMIN, OWNER_ADDRESS: ownerKp.publicKey.toBase58() });
   const KC = Keypair.generate(), KD = Keypair.generate();
   fake.airdrop(KC.publicKey.toBase58(), LAMPORTS_PER_SOL); fake.airdrop(KD.publicKey.toBase58(), LAMPORTS_PER_SOL);
   const LC = await login(KC), LD = await login(KD);
@@ -465,6 +469,12 @@ const errOf = (state) => (state.msgs.find((m) => m.t === 'error') || {}).message
       check('fee shows up as extra surplus, solvency still covered', fa.solvency.ok && near(fa.solvency.surplusSol - feeS0, win.fee / 100, 1e-5), [fa.solvency.surplusSol, feeS0, win.fee]);
       const ledgerFee = fs.readFileSync(feeData + '.ledger.jsonl', 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((e) => e.type === 'cashout');
       check('ledger records the fee on the cash-out', ledgerFee.length === 1 && near(ledgerFee[0].feeCredits, win.fee, 1e-6), ledgerFee);
+      check('admin shows the fees as available to take, and where they would go', fa.earnings.ownerAddress === ownerKp.publicKey.toBase58() && near(fa.earnings.availableSol * 100, win.fee, 1e-4) && fa.earnings.maxNowSol <= fa.earnings.availableSol, fa.earnings);
+      // The destination is never part of the request: whatever a caller says, only OWNER_ADDRESS is possible.
+      const tooMuch = await admin('POST', '/admin/api/withdraw-earnings', { solAmount: fa.earnings.availableSol + 5, idempotencyKey: 'e2e-earn-toomuch1', to: 'AttackerAddress', playerAddress: 'AttackerAddress' });
+      check('asking for more than the collected fees is refused', tooMuch.status === 400 && tooMuch.json.code === 'over_earnings', tooMuch);
+      const ownerBalance = await conn.getBalance(ownerKp.publicKey);
+      check('nothing was sent to anyone', ownerBalance === 0);
     }
   }
   c.ws.close(); d.ws.close();
