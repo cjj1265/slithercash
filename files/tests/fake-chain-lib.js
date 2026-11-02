@@ -44,6 +44,8 @@ class FakeConnection {
 
   async getBalance(pk) { return load().accounts[pk.toBase58()] || 0; }
 
+  async getAccountInfo(pk) { const l = load().accounts[pk.toBase58()] || 0; return l > 0 ? { lamports: l } : null; }
+
   async getMultipleAccountsInfo(pks) {
     const s = load();
     return pks.map((pk) => { const l = s.accounts[pk.toBase58()] || 0; return l > 0 ? { lamports: l } : null; });

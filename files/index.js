@@ -142,6 +142,7 @@ function balanceBody(b) { return { sol: b.sol, credits: b.credits }; }
  *   POST /api/login { publicKey, message, signature(base64) } -> { playerId, address, sol, credits, rate }
  *   GET  /api/player-deposit-address?playerId= -> { address, balance, solBalance, rate, minDepositSol }
  *   GET  /api/player-balance?playerId=         -> { sol, credits }
+ *   POST /api/check-deposit (X-Player-Id)      -> { sol, credits }  — looks for a pending deposit right now
  *   POST /api/withdraw { playerAddress, solAmount, playerId, idempotencyKey }
  * playerId may also be sent as an X-Player-Id header, which keeps it out of URLs and access logs.
  */
@@ -152,7 +153,7 @@ async function handleApi(req, res) {
   try {
     const url = new URL(req.url, 'http://localhost');
     const route = req.method + ' ' + url.pathname;
-    const known = ['GET /api/config', 'GET /api/login-challenge', 'POST /api/login', 'GET /api/player-deposit-address', 'GET /api/player-balance', 'POST /api/withdraw'];
+    const known = ['GET /api/config', 'GET /api/login-challenge', 'POST /api/login', 'GET /api/player-deposit-address', 'GET /api/player-balance', 'POST /api/check-deposit', 'POST /api/withdraw'];
     if (!known.includes(route)) { sendJson(res, 404, { error: 'Not found.' }); return; }
 
     // Public and harmless: lets the page say "Devnet" or not before anyone connects a wallet.
@@ -198,6 +199,15 @@ async function handleApi(req, res) {
     if (route === 'GET /api/player-balance') {
       if (rateLimited('read', playerId, 60, 60000)) throw new wallet.WalletError('rate_limited', 'Too many requests', 429);
       sendJson(res, 200, Object.assign(balanceBody(wallet.getPlayerBalance(playerId)), { paused: wallet.isPaused() }));
+      return;
+    }
+
+    if (route === 'POST /api/check-deposit') {
+      // Same answer as /api/player-balance, but first looks on the chain for this player's deposit instead
+      // of waiting for the 30s poll. Costs RPC calls, so it is rate limited per player.
+      if (rateLimited('check', playerId, 20, 60000)) throw new wallet.WalletError('rate_limited', 'Too many requests', 429);
+      const bal = await wallet.checkPlayerDepositNow(playerId);
+      sendJson(res, 200, Object.assign(balanceBody(bal), { paused: wallet.isPaused() }));
       return;
     }
 

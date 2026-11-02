@@ -785,6 +785,29 @@ async function scanPlayerDeposits(playerId) {
   }
 }
 
+/**
+ * Look for ONE player's deposit right now, instead of waiting for the next 30s poll. The page calls this
+ * while the deposit window is open. It takes the same lock as the poller (`polling`), so a deposit can
+ * never be scanned by both at once; if the poller is busy the caller simply gets the current balance.
+ */
+async function checkPlayerDepositNow(playerId) {
+  const player = requirePlayer(playerId);
+  if (polling) return balanceOf(player);
+  polling = true;
+  try {
+    const info = await connection.getAccountInfo(new PublicKey(player.address), 'finalized');
+    if ((info && info.lamports > 0) || player.needsSweep) {
+      await scanPlayerDeposits(playerId);
+      if (player.needsSweep) await sweepToGameWallet(playerId);
+    }
+  } catch (e) {
+    console.error('[wallet] on-demand deposit check failed for ' + player.address + ':', e.message);
+  } finally {
+    polling = false;
+  }
+  return balanceOf(player);
+}
+
 async function pollDeposits() {
   if (!enabled || polling) return;
   polling = true;
@@ -939,5 +962,6 @@ module.exports = {
   setPaused,
   sendAlert,
   logLedger: ledger,
+  checkPlayerDepositNow,
   pollDeposits, // exposed for tests
 };

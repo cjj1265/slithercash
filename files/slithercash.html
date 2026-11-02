@@ -706,7 +706,7 @@ resize();
 let wallet = 0;
 let history = [];
 // Server-side (Phantom / devnet) balance. Only meaningful while SOL.connected.
-const SOL = { connected:false, provider:null, publicKey:null, playerId:null, rate:100, sol:0, credits:0, known:false, pollTimer:null, limits:null, paused:false, network:'devnet' };
+const SOL = { connected:false, provider:null, publicKey:null, playerId:null, rate:100, sol:0, credits:0, known:false, pollTimer:null, watchUntil:0, limits:null, paused:false, network:'devnet' };
 
 function loadWallet(){
   try{ const v = parseFloat(localStorage.getItem('sc_wallet_v1')); if(!isNaN(v)) return v; }catch(e){}
@@ -2115,19 +2115,33 @@ function solApplyBalance(b){
   solUpdateUI();
 }
 
-async function solRefreshBalance(){
+/** deep = ask the server to look for a pending deposit on the chain right now, not just report what it has. */
+async function solRefreshBalance(deep){
   if(!SOL.connected) return;
-  try{ solApplyBalance(await solApi('/api/player-balance')); }
+  try{ solApplyBalance(deep ? await solApi('/api/check-deposit', { method: 'POST', body: '{}' }) : await solApi('/api/player-balance')); }
   catch(e){
     if(e.status === 401){ solReset('Session expired — reconnect your wallet.'); }
     // any other failure: keep showing the last balance and try again on the next poll
   }
 }
 
+/* The balance refreshes by itself: every 10s normally, and every 4s with an on-chain deposit check while the
+   deposit window is open and for 3 minutes after it was opened (people close it to go and send the money). */
+function solWatching(){ return !depositModal.classList.contains('hidden') || Date.now() < SOL.watchUntil; }
+function solPollLoop(){
+  clearTimeout(SOL.pollTimer);
+  if(!SOL.connected) return;
+  const watching = solWatching();
+  SOL.pollTimer = setTimeout(async ()=>{
+    if(watching || !document.hidden) await solRefreshBalance(watching);
+    solPollLoop();
+  }, watching ? 4000 : 10000);
+}
+
 function solReset(message){
   SOL.connected = false; SOL.playerId = null; SOL.publicKey = null; SOL.known = false;
   SOL.sol = 0; SOL.credits = 0;
-  clearInterval(SOL.pollTimer); SOL.pollTimer = null;
+  clearTimeout(SOL.pollTimer); SOL.pollTimer = null; SOL.watchUntil = 0;
   depositModal.classList.add('hidden');
   withdrawModal.classList.add('hidden');
   solSetNote(message || solIdleNote(), !!message);
@@ -2163,8 +2177,8 @@ async function solConnect(){
     SOL.known = false;
     solSetNote('');
     solApplyBalance(login);
-    clearInterval(SOL.pollTimer);
-    SOL.pollTimer = setInterval(()=>{ if(!document.hidden) solRefreshBalance(); }, 10000);
+    SOL.watchUntil = 0;
+    solPollLoop();
   }catch(e){
     const rejected = e && (e.code === 4001 || /reject|denied|cancel/i.test(e.message || ''));
     solReset(rejected ? 'Connection cancelled in Phantom.' : ('Could not connect: ' + (e.message || 'unknown error')));
@@ -2186,6 +2200,8 @@ async function solOpenDeposit(){
   addrEl.textContent = 'Loading…';
   qr.removeAttribute('src');
   depositModal.classList.remove('hidden');
+  SOL.watchUntil = Date.now() + 180000; // look for the deposit on the chain every few seconds for the next 3 minutes
+  solPollLoop();
   try{
     const d = await solApi('/api/player-deposit-address');
     addrEl.textContent = d.address;
@@ -2287,9 +2303,17 @@ function solInit(){
 
   const provider = solProvider();
   if(provider && provider.on){
-    provider.on('disconnect', ()=>{ if(SOL.connected) solReset(); });
-    provider.on('accountChanged', ()=>{ if(SOL.connected) solReset('Wallet changed — reconnect to continue.'); });
+    // Phantom fires these when it locks itself, when its popup opens, or when the user switches account.
+    // Only a switch to a DIFFERENT wallet ends our session: the session lives on the server and needs nothing
+    // from the extension, and resetting on every event is what used to stop the balance updating.
+    provider.on('accountChanged', (pk)=>{
+      if(SOL.connected && pk && String(pk) !== SOL.publicKey) solReset('Wallet changed — reconnect to continue.');
+    });
   }
+  // Coming back to the page (from Phantom, another tab or another app): refresh at once, not up to 10s later.
+  const refreshNow = ()=>{ if(SOL.connected && !document.hidden){ solRefreshBalance(solWatching()); solPollLoop(); } };
+  document.addEventListener('visibilitychange', refreshNow);
+  window.addEventListener('focus', refreshNow);
   solApplyNetwork();
   solUpdateUI();
   // Learn the network up front so the menu never says "Devnet" on a real-money server.

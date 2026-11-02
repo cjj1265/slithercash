@@ -36,6 +36,8 @@ A Slither.io-style browser game with a stake. Players deposit SOL, buy in with p
 - adds the credit and the signature to a persisted `processed` set in one `save()`,
 - then `sweepToGameWallet` (`:689`) moves the funds into the game wallet. The sweep fee (5000 lamports) is paid out of the deposit.
 
+The page can also ask for an on-demand check of **one** player's deposit (`POST /api/check-deposit`, `checkPlayerDepositNow`), which it does every 4s while the deposit window is open and for 3 minutes after. It takes the same `polling` lock as the poller, so a deposit can never be scanned by both at once (a double credit otherwise); if the poller is busy the caller just gets the current balance. It is rate limited to 20 a minute per player.
+
 **3. Buy-in.** WebSocket `join` with a `walletId` (`index.js:368`). `assertCanBuyIn` (pause + $20 cap), then `deductPlayer` synchronously, then the player is placed in the **real-money world**. No `walletId` means free practice play in a separate world.
 
 **4. Play.** `GameWorld` is authoritative; the client sends only steering and a boost flag. Two rules keep value conserved:
@@ -72,7 +74,7 @@ From `files/` (Node 18+, after `npm install`):
 npm run test:economy   # value conservation in the game simulation (seconds)
 npm run test:fee       # cash-out fee maths (seconds)
 npm run test:ws        # WebSocket attack tests against wsProtocol.js with a raw TCP client (seconds)
-npm run test:wallet    # end-to-end: 104 checks, a few minutes
+npm run test:wallet    # end-to-end: 111 checks, a few minutes
 ```
 
 `test:ws` sends exactly what a hostile client would: oversized and lying frame headers, floods, unmasked and fragmented frames, reserved bits, bad opcodes, wrong origins, too many connections, silent connections and a client that stops reading.
