@@ -21,7 +21,8 @@ A Slither.io-style browser game with a stake. Players deposit SOL, buy in with p
 ## Units
 
 - Balances are stored as **integer lamports**, never floats.
-- 1 SOL = 100 game credits, shown as "$". A $5 buy-in is 0.05 SOL.
+- 1 SOL = 100 game credits (`CREDITS_PER_SOL`). On **devnet** (play money) credits are shown as "$": a $5 buy-in is 0.05 SOL.
+- On **mainnet** credits are an internal unit only: the page and server messages show real SOL (for example `◎0.050`) and never a dollar figure, because the server cannot know SOL's price. "1 SOL = $100" is a play-money rule, not a price. Practice play (no wallet connected) always shows play-money "$".
 - Conversions are at the edges (`solToLamports`, `lamportsToCredits`); credits are floats inside the game simulation.
 
 ## How money moves
@@ -71,7 +72,7 @@ From `files/` (Node 18+, after `npm install`):
 npm run test:economy   # value conservation in the game simulation (seconds)
 npm run test:fee       # cash-out fee maths (seconds)
 npm run test:ws        # WebSocket attack tests against wsProtocol.js with a raw TCP client (seconds)
-npm run test:wallet    # end-to-end: 102 checks, a few minutes
+npm run test:wallet    # end-to-end: 104 checks, a few minutes
 ```
 
 `test:ws` sends exactly what a hostile client would: oversized and lying frame headers, floods, unmasked and fragmented frames, reserved bits, bad opcodes, wrong origins, too many connections, silent connections and a client that stops reading.
