@@ -1,6 +1,6 @@
 // solanaWallet.js
 //
-// Devnet deposit / withdraw plumbing for SlitherCash.
+// Deposit / withdraw plumbing for SnakePay.
 //
 // Money model
 //   * 1 SOL = 100 game credits ("$" in the UI), so a $5 buy-in is 0.05 SOL.
@@ -174,7 +174,7 @@ function sendAlert(key, message, minGapMs) {
   const now = Date.now();
   if ((alertLast.get(key) || 0) + (minGapMs === undefined ? 10 * 60 * 1000 : minGapMs) > now) return;
   alertLast.set(key, now);
-  const text = 'SlitherCash: ' + message;
+  const text = 'SnakePay: ' + message;
   fetch(ALERT_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -272,7 +272,8 @@ function createLoginChallenge(publicKeyBase58) {
     if (challenges.size >= MAX_CHALLENGES) throw new WalletError('busy', 'Too many pending logins, try again shortly', 429);
   }
   const nonce = crypto.randomBytes(16).toString('hex');
-  const message = 'SlitherCash devnet login\nWallet: ' + pk + '\nNonce: ' + nonce + '\nIssued: ' + new Date(now).toISOString();
+  // This is what the wallet shows when asking the player to sign, so it must say the truth about the network.
+  const message = 'SnakePay login (' + (network === 'mainnet-beta' ? 'mainnet' : (network || 'devnet')) + ')\nWallet: ' + pk + '\nNonce: ' + nonce + '\nIssued: ' + new Date(now).toISOString();
   challenges.set(nonce, { publicKey: pk, message, expires: now + CHALLENGE_TTL_MS });
   return { message, nonce };
 }
@@ -960,6 +961,8 @@ function init() {
     if (!seed || seed.length < 16) {
       console.warn('[wallet] DEPOSIT_MASTER_SEED not set (or too short) — deriving it from GAME_WALLET_SECRET. Set a dedicated one before real use.');
     }
+    // This label is part of how every deposit address and player id is derived. It keeps the project's
+    // ORIGINAL name on purpose and must never change, or every address and balance key would change with it.
     masterKey = crypto.createHash('sha256').update('slithercash/master/v1\0' + (seed && seed.length >= 16 ? seed : Buffer.from(game.secretKey).toString('base64'))).digest();
 
     loadStore();

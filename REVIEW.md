@@ -1,4 +1,4 @@
-# SlitherCash: guide for a code reviewer
+# SnakePay: guide for a code reviewer
 
 This is for someone reviewing the money-handling code before real funds are put through it. It says what the system is, how money moves, what protects it, what is tested, and where I think the weak spots are. Line numbers are approximate and drift as the code changes; function names are the stable reference.
 
@@ -6,7 +6,7 @@ This is for someone reviewing the money-handling code before real funds are put 
 
 ## What it is
 
-A Slither.io-style browser game with a stake. Players deposit SOL, buy in with part of their balance, play on a server-authoritative map, cash out, and withdraw. One Node process serves everything. There is no database; state is one JSON file plus an append-only ledger file.
+A browser snake game with a stake (the project's original name, SlitherCash, survives in file names and one key-derivation label). Players deposit SOL, buy in with part of their balance, play on a server-authoritative map, cash out, and withdraw. One Node process serves everything. There is no database; state is one JSON file plus an append-only ledger file.
 
 | File | Role |
 |---|---|
