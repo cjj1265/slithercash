@@ -459,7 +459,7 @@
       <div id="walletHistory" class="wallet-history"></div>
 
       <button type="button" class="sol-connect-btn" id="solConnectBtn">Connect Phantom</button>
-      <div class="sol-note" id="solNote">Devnet only &middot; connect to play with deposited SOL</div>
+      <div class="sol-note" id="solNote">Connect to play with deposited SOL</div>
 
       <div class="sol-panel sol-hidden" id="solPanel">
         <div class="sol-row"><span class="sol-key">SOL balance</span><span class="sol-val" id="solBalance">0.0000 SOL</span></div>
@@ -539,11 +539,11 @@
   <div class="sol-box">
     <button type="button" class="sol-x" data-sol-close aria-label="Close">&times;</button>
     <div class="sol-title">Deposit SOL</div>
-    <div class="sol-sub">Devnet only &middot; minimum <span id="depositMin">0.01</span> SOL &middot; 1 SOL = $<span id="depositRate">100</span></div>
+    <div class="sol-sub"><span id="depositNet">Devnet only &middot; </span>minimum <span id="depositMin">0.01</span> SOL &middot; 1 SOL = $<span id="depositRate">100</span></div>
     <img id="depositQr" alt="Deposit address QR code" width="200" height="200">
     <div class="sol-addrbox" id="depositAddr">Loading&hellip;</div>
     <button type="button" class="btn btn-gold" id="depositCopyBtn" style="margin-top:12px;">Copy address</button>
-    <div class="sol-hint">Send devnet SOL to this address from any wallet (switch Phantom to Devnet in its developer settings). Your balance updates within about a minute.</div>
+    <div class="sol-hint" id="depositHint">Send devnet SOL to this address from any wallet (switch Phantom to Devnet in its developer settings). Your balance updates within about a minute.</div>
   </div>
 </div>
 
@@ -695,7 +695,7 @@ resize();
 let wallet = 0;
 let history = [];
 // Server-side (Phantom / devnet) balance. Only meaningful while SOL.connected.
-const SOL = { connected:false, provider:null, publicKey:null, playerId:null, rate:100, sol:0, credits:0, known:false, pollTimer:null, limits:null, paused:false };
+const SOL = { connected:false, provider:null, publicKey:null, playerId:null, rate:100, sol:0, credits:0, known:false, pollTimer:null, limits:null, paused:false, network:'devnet' };
 
 function loadWallet(){
   try{ const v = parseFloat(localStorage.getItem('sc_wallet_v1')); if(!isNaN(v)) return v; }catch(e){}
@@ -1876,7 +1876,7 @@ async function startGame(){
     return;
   }
   if(SOL.connected && buyin > SOL.credits + 1e-9){
-    alert('Not enough balance for a $' + buyin.toFixed(2) + ' buy-in. You have $' + SOL.credits.toFixed(2) + '. Deposit devnet SOL first.');
+    alert('Not enough balance for a $' + buyin.toFixed(2) + ' buy-in. You have $' + SOL.credits.toFixed(2) + '. Deposit SOL first.');
     return;
   }
 
@@ -2001,6 +2001,17 @@ function solSetNote(text, isErr){
   solNote.textContent = text;
   solNote.classList.toggle('err', !!isErr);
 }
+function solIsMain(){ return SOL.network === 'mainnet-beta'; }
+function solIdleNote(){ return (solIsMain() ? '' : 'Devnet only · ') + 'connect to play with deposited SOL'; }
+/** Words that differ between play-money devnet and real mainnet. */
+function solApplyNetwork(network){
+  if(network) SOL.network = network;
+  document.getElementById('depositNet').textContent = solIsMain() ? '' : 'Devnet only · ';
+  document.getElementById('depositHint').textContent = solIsMain()
+    ? 'Send SOL to this address from any wallet. Your balance updates within about a minute.'
+    : 'Send devnet SOL to this address from any wallet (switch Phantom to Devnet in its developer settings). Your balance updates within about a minute.';
+  if(!SOL.connected && !solNote.classList.contains('err')) solNote.textContent = solIdleNote();
+}
 function solShort(addr){ return addr ? addr.slice(0,4) + '…' + addr.slice(-4) : ''; }
 function solNewKey(){
   if(window.crypto && crypto.randomUUID) return crypto.randomUUID();
@@ -2033,7 +2044,7 @@ function solUpdateUI(){
   buyinInput.max = (on && SOL.limits) ? SOL.limits.maxBuyin : CFG.MAX_BUYIN;
   solPanel.classList.toggle('sol-hidden', !on);
   document.getElementById('walletLabel').textContent = on ? 'Wallet Balance' : 'Your Earnings';
-  document.getElementById('walletSub').textContent = on ? 'Devnet SOL held by the game server' : 'Practice balance, saved on this device';
+  document.getElementById('walletSub').textContent = on ? (solIsMain() ? 'SOL held by the game server' : 'Devnet SOL held by the game server') : 'Practice balance, saved on this device';
   if(on){
     document.getElementById('solBalance').textContent = SOL.sol.toFixed(4) + ' SOL';
     document.getElementById('solUsd').textContent = '$' + SOL.credits.toFixed(2);
@@ -2066,14 +2077,14 @@ function solReset(message){
   clearInterval(SOL.pollTimer); SOL.pollTimer = null;
   depositModal.classList.add('hidden');
   withdrawModal.classList.add('hidden');
-  solSetNote(message || 'Devnet only · connect to play with deposited SOL', !!message);
+  solSetNote(message || solIdleNote(), !!message);
   solUpdateUI();
 }
 
 async function solConnect(){
   const provider = solProvider();
   if(!provider){
-    solSetNote('Phantom not found. Install it from phantom.app, switch it to Devnet, then reload this page.', true);
+    solSetNote('Phantom not found. Install it from phantom.app' + (solIsMain() ? '' : ', switch it to Devnet') + ', then reload this page.', true);
     solUpdateUI();
     return;
   }
@@ -2094,6 +2105,7 @@ async function solConnect(){
     SOL.rate = login.rate || SOL.rate;
     SOL.limits = login.limits || null;
     SOL.paused = !!login.paused;
+    solApplyNetwork(login.network);
     SOL.connected = true;
     SOL.known = false;
     solSetNote('');
@@ -2182,7 +2194,7 @@ async function solSubmitWithdraw(){
     });
     if(r.status === 'completed'){
       rotateKey = true;
-      const link = 'https://explorer.solana.com/tx/' + encodeURIComponent(r.signature) + '?cluster=devnet';
+      const link = 'https://explorer.solana.com/tx/' + encodeURIComponent(r.signature) + (solIsMain() ? '' : '?cluster=' + (SOL.network === 'testnet' ? 'testnet' : 'devnet'));
       solSetWithdrawStatus('Sent ' + r.sol.toFixed(4) + ' SOL. <a href="' + link + '" target="_blank" rel="noopener">View transaction</a>', 'ok');
       solToast('Withdrew ' + r.sol.toFixed(4) + ' SOL');
       withdrawAmount.value = '';
@@ -2222,7 +2234,10 @@ function solInit(){
     provider.on('disconnect', ()=>{ if(SOL.connected) solReset(); });
     provider.on('accountChanged', ()=>{ if(SOL.connected) solReset('Wallet changed — reconnect to continue.'); });
   }
+  solApplyNetwork();
   solUpdateUI();
+  // Learn the network up front so the menu never says "Devnet" on a real-money server.
+  fetch('/api/config').then(r => r.json()).then(c => { solApplyNetwork(c.network); solUpdateUI(); }).catch(()=>{});
 }
 
 /* ============================== LOADING SCREEN ============================== */

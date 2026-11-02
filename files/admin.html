@@ -123,12 +123,12 @@ function render(s){
   const p = s.pause;
   const banner = $('banner');
   banner.className = 'banner ' + (p.paused ? 'paused' : 'running');
-  banner.textContent = p.paused
+  banner.textContent = (s.network === 'mainnet-beta' ? 'MAINNET (real money) — ' : s.network + ' (play money) — ') + (p.paused
     ? 'PAUSED — ' + (p.reason || '') + (p.at ? ' (' + new Date(p.at).toLocaleString() + ', by ' + p.by + ')' : '')
-    : 'Running normally';
+    : 'Running normally');
 
   $('houseSol').textContent = fmt(s.gameWallet.sol) + ' SOL';
-  $('houseAddr').textContent = s.gameWallet.address + '  ·  ' + s.rpc;
+  $('houseAddr').textContent = s.gameWallet.address + '  ·  ' + s.network + '  ·  ' + s.rpc;
 
   const v = s.solvency;
   $('solvencyBig').textContent = (v.surplusSol >= 0 ? '+' : '') + fmt(v.surplusSol) + ' SOL';
