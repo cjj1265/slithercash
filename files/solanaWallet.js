@@ -76,6 +76,10 @@ const LIMITS = {
   insolvencyToleranceLamports: Math.round(envNum('INSOLVENCY_TOLERANCE_SOL', 0.02) * LAMPORTS_PER_SOL),
 };
 const ALERT_URL = process.env.ALERT_WEBHOOK_URL || '';
+
+// The house fee: this percent of a cash-out's PROFIT (what it is worth above the buy-in). Cashing out
+// at or below the buy-in costs nothing, and the stake itself is never touched. 0 turns it off.
+const RAKE_PERCENT = (() => { const n = Number(process.env.RAKE_PERCENT); return Number.isFinite(n) && n >= 0 && n <= 50 ? n : 5; })();
 const MAX_CHALLENGES = 5000;
 
 class WalletError extends Error {
@@ -97,7 +101,7 @@ let polling = false;
 
 // Persisted. players[playerId] = { owner, address, lamports, lastSig, needsSweep, createdAt }
 // withdrawals[`${playerId}:${idempotencyKey}`] = { ..., status: pending|sending|completed|refunded }
-let store = { version: 1, players: {}, processedSignatures: [], withdrawals: {}, paused: null, feesLamports: 0 };
+let store = { version: 1, players: {}, processedSignatures: [], withdrawals: {}, paused: null, feesLamports: 0, rakeLamports: 0 };
 const GENESIS_NETWORKS = {
   'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG': 'devnet',
   '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d': 'mainnet-beta',
@@ -129,6 +133,7 @@ function loadStore() {
     withdrawals: parsed.withdrawals || {},
     paused: parsed.paused || null,
     feesLamports: parsed.feesLamports || 0,
+    rakeLamports: parsed.rakeLamports || 0,
   };
   for (const sig of store.processedSignatures) processed.add(sig);
 }
@@ -327,6 +332,31 @@ function creditPlayer(playerId, sol) {
   return balanceOf(player);
 }
 
+/**
+ * Credit a cash-out, keeping the house fee: RAKE_PERCENT of the profit (the amount above the buy-in).
+ * Fee-free when the player cashes out at or below what they paid in. The fee simply stays in the
+ * game wallet, so it shows up as surplus; rakeLamports is the running total for the admin page.
+ */
+function settleCashout(playerId, amountCredits, buyinCredits) {
+  const player = requirePlayer(playerId);
+  const grossLamports = Math.round(amountCredits / CREDITS_PER_SOL * LAMPORTS_PER_SOL);
+  const buyinLamports = solToLamports(buyinCredits / CREDITS_PER_SOL);
+  const profit = Math.max(0, grossLamports - buyinLamports);
+  const feeLamports = Math.floor(profit * RAKE_PERCENT / 100);
+  const netLamports = grossLamports - feeLamports;
+  player.lamports += netLamports;
+  store.rakeLamports += feeLamports;
+  save();
+  const result = {
+    grossCredits: lamportsToCredits(grossLamports),
+    feeCredits: lamportsToCredits(feeLamports),
+    netCredits: lamportsToCredits(netLamports),
+    feeLamports, balance: balanceOf(player),
+  };
+  ledger('cashout', { walletId: playerId, buyin: buyinCredits, credits: amountCredits, feeCredits: result.feeCredits, netCredits: result.netCredits });
+  return result;
+}
+
 /** Remove SOL from a player's stored balance. Throws insufficient_balance rather than going negative. */
 function deductPlayer(playerId, sol) {
   const player = requirePlayer(playerId);
@@ -346,7 +376,7 @@ async function getGameBalance() {
 
 /** What clients may be told about the limits, so the UI can steer players before the server refuses them. */
 function getPublicLimits() {
-  return { maxWithdrawSol: lamportsToSol(LIMITS.maxWithdrawLamports), maxBuyin: LIMITS.maxBuyinCredits };
+  return { maxWithdrawSol: lamportsToSol(LIMITS.maxWithdrawLamports), maxBuyin: LIMITS.maxBuyinCredits, rakePercent: RAKE_PERCENT };
 }
 
 /** Called before a wallet-backed buy-in. Throws if the site is paused or the stake is above the limit. */
@@ -455,6 +485,7 @@ async function getAdminStatus() {
       lowWalletSol: lamportsToSol(LIMITS.lowWalletLamports),
       toleranceSol: lamportsToSol(LIMITS.insolvencyToleranceLamports),
     },
+    earnings: { feesCollectedSol: lamportsToSol(store.rakeLamports), rakePercent: RAKE_PERCENT, networkCostsSol: lamportsToSol(store.feesLamports) },
     withdrawnLast24hSol: lamportsToSol(out.total),
     playerCount: Object.keys(store.players).length,
     alertsConfigured: !!ALERT_URL,
@@ -850,6 +881,7 @@ async function verifyNetworkThenStart() {
   console.log('[wallet] enabled on ' + network + ' via ' + RPC_URL.replace(/\/\/([^/@]*@)?([^/?]+).*/, '//$2/…'));
   console.log('[wallet] game wallet: ' + game.publicKey.toBase58());
   console.log('[wallet] data file: ' + DATA_FILE);
+  console.log('[wallet] house fee: ' + RAKE_PERCENT + '% of cash-out profit');
   console.log('[wallet] limits: withdraw ' + lamportsToSol(LIMITS.maxWithdrawLamports) + ' SOL each, ' +
     lamportsToSol(LIMITS.maxPlayerDailyLamports) + '/player/day, ' + lamportsToSol(LIMITS.maxGlobalDailyLamports) + '/day total; buy-in max $' + LIMITS.maxBuyinCredits);
   if (isPaused()) console.warn('[wallet] PAUSED: ' + getPauseInfo().reason);
@@ -882,6 +914,7 @@ module.exports = {
   getPlayerDepositAddress,
   getPlayerBalance,
   creditPlayer,
+  settleCashout,
   deductPlayer,
   withdraw,
   getGameBalance,
