@@ -469,6 +469,30 @@ const errOf = (state) => (state.msgs.find((m) => m.t === 'error') || {}).message
   }
   c.ws.close(); d.ws.close();
 
+  console.log('\n== on-demand deposit check (the page asks for it while the deposit window is open) ==');
+  await stopServer();
+  const odData = path.join(SP, 'e2e-wallet-data-ondemand.json');
+  for (const f of [odData, odData + '.ledger.jsonl']) fs.rmSync(f, { force: true });
+  await startServer(game, odData, { DEPOSIT_POLL_MS: '600000' }); // the background poller effectively never runs
+  const KE = Keypair.generate();
+  fake.airdrop(KE.publicKey.toBase58(), LAMPORTS_PER_SOL);
+  const LE = await login(KE);
+  const pidE = LE.res.json.playerId, HE = { 'X-Player-Id': pidE };
+  await sleep(3500); // the one startup poll has come and gone
+  await transfer(KE, LE.res.json.address, 0.03 * LAMPORTS_PER_SOL);
+  await sleep(1500);
+  check('without the on-demand check the deposit is not seen yet (poller idle)', near((await balanceOf(pidE)).sol, 0));
+  const od = await http_('POST', '/api/check-deposit', {}, HE);
+  check('check-deposit finds and credits the deposit at once', od.status === 200 && near(od.json.sol, 0.03), od);
+  check('the deposit address was swept into the game wallet', (await conn.getBalance(new PublicKey(LE.res.json.address))) === 0);
+  const od2 = await http_('POST', '/api/check-deposit', {}, HE);
+  check('asking again does not credit it twice', near(od2.json.sol, 0.03), od2.json);
+  check('check-deposit needs a valid player (401 without one)', (await http_('POST', '/api/check-deposit', {})).status === 401);
+  let limited = 0;
+  for (let i = 0; i < 25; i++) if ((await http_('POST', '/api/check-deposit', {}, HE)).status === 429) limited++;
+  check('check-deposit is rate limited per player (20 a minute)', limited >= 1, limited);
+  check('the credit is recorded in the ledger once', fs.readFileSync(odData + '.ledger.jsonl', 'utf8').split('\n').filter((l) => l.includes('"type":"deposit"')).length === 1);
+
   console.log('\n== network guard: the wallet only starts on a network it has verified and is allowed to use ==');
   await stopServer();
   const guardData = path.join(SP, 'e2e-wallet-data-guard.json');
