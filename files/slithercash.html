@@ -1895,6 +1895,11 @@ document.getElementById('skinDoneBtn').addEventListener('click', ()=>{
 
 /* ============================== START / RESTART ============================== */
 async function startGame(){
+  // The server refuses unsigned players too; this just sends them to the Connect button instead of an error.
+  if(SOL.walletOn && !SOL.connected){
+    await solConnect();
+    if(!SOL.connected) return;
+  }
   const name = nameInput.value.trim() || randName();
   // The field is in SOL on mainnet and in play-money dollars otherwise; the server always works in credits.
   let buyin = parseFloat(buyinInput.value) * (buyinInSol ? SOL.rate : 1);
@@ -2320,7 +2325,7 @@ function solInit(){
   solApplyNetwork();
   solUpdateUI();
   // Learn the network up front so the menu never says "Devnet" on a real-money server.
-  fetch('/api/config').then(r => r.json()).then(c => { if(c.creditsPerSol) SOL.rate = c.creditsPerSol; solApplyNetwork(c.network); solUpdateUI(); }).catch(()=>{});
+  fetch('/api/config').then(r => r.json()).then(c => { SOL.walletOn = !!c.enabled; if(c.creditsPerSol) SOL.rate = c.creditsPerSol; solApplyNetwork(c.network); solUpdateUI(); }).catch(()=>{});
 }
 
 /* ============================== LOADING SCREEN ============================== */
