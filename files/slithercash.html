@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>SlitherCash</title>
+<title>SnakePay</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Anton&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;800&display=swap" rel="stylesheet">
@@ -439,14 +439,14 @@
 
 <!-- Loading screen -->
 <div id="loadingScreen">
-  <div class="loading-logo">SLITHER<span>CASH</span></div>
+  <div class="loading-logo">SNAKE<span>PAY</span></div>
   <div class="loading-bar-track"><div class="loading-bar-fill" id="loadingBarFill"></div></div>
   <div class="loading-tip" id="loadingTip"></div>
 </div>
 
 <!-- Start screen -->
 <div id="startScreen" class="overlay hidden">
-  <div class="brand-mark">Slither<span>Cash</span></div>
+  <div class="brand-mark">Snake<span>Pay</span></div>
   <div class="panel">
     <input id="nameInput" type="text" maxlength="16" placeholder="Enter your casher name">
 
@@ -1300,7 +1300,7 @@ function drawSnake(snake){
   ctx.strokeStyle = snake.boosting ? 'rgba(255,255,255,0.34)' : 'rgba(255,255,255,0.18)';
   ctx.lineWidth = Math.max(1, r*0.55); ctx.stroke();
 
-  // crisp specular shine line for a glossy, slither.io-like finish
+  // crisp specular shine line for a glossy, classic snake-game finish
   ctx.beginPath(); drawSmoothPath(ctx, specularPts);
   ctx.strokeStyle = snake.boosting ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.32)';
   ctx.lineWidth = Math.max(0.8, r*0.18); ctx.stroke();

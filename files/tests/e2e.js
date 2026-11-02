@@ -1,4 +1,4 @@
-// End-to-end test of the SlitherCash wallet against a simulated chain (throwaway keys only).
+// End-to-end test of the SnakePay wallet against a simulated chain (throwaway keys only).
 // Run from the files/ folder:  npm run test:wallet   (takes a few minutes: it waits out real polling intervals)
 // Covers: auth, deposits, play, withdrawals, persistence, wiped-store regression, withdrawal limits,
 // buy-in cap, pause switch, admin API, alerts, world separation, solvency auto-pause.

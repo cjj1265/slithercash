@@ -1,6 +1,6 @@
 // gameServer.js
 //
-// Server-authoritative simulation for SlitherCash multiplayer.
+// Server-authoritative simulation for SnakePay multiplayer.
 //
 // This intentionally mirrors the single-player client's simulation logic
 // (movement, bot AI, collision, orb economy, death/cash-out) so behavior
@@ -273,7 +273,7 @@ class GameWorld {
   }
 
   /**
-   * Head-to-head resolution, slither.io style: when two heads meet, the SMALLER
+   * Head-to-head resolution, classic snake-game style: when two heads meet, the SMALLER
    * snake dies and the bigger one survives (and eats the drop). Only a near-exact
    * tie kills both. Returns an array of [snake, killerName] pairs to kill.
    */
@@ -295,7 +295,7 @@ class GameWorld {
         } else if (ratio < 0.95) {
           if (!doomed.has(a.id)) { doomed.add(a.id); deaths.push([a, b.name]); }
         } else {
-          // near-identical size: mutual destruction, same as slither.io
+          // near-identical size: mutual destruction
           if (!doomed.has(a.id)) { doomed.add(a.id); deaths.push([a, b.name]); }
           if (!doomed.has(b.id)) { doomed.add(b.id); deaths.push([b, a.name]); }
         }

@@ -1,7 +1,7 @@
 {
-  "name": "slithercash-server",
+  "name": "snakepay-server",
   "version": "0.1.0",
-  "description": "Authoritative multiplayer server for SlitherCash",
+  "description": "Authoritative multiplayer server for SnakePay",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",

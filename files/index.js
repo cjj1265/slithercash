@@ -1,4 +1,4 @@
-// index.js — SlitherCash multiplayer server entry point.
+// index.js — SnakePay multiplayer server entry point.
 //
 // Run: node index.js
 // Env: PORT (default 8787)
@@ -568,7 +568,7 @@ setInterval(() => {
 }, TICK_MS);
 
 httpServer.listen(PORT, () => {
-  console.log(`SlitherCash multiplayer server listening on :${PORT}`);
+  console.log(`SnakePay multiplayer server listening on :${PORT}`);
   console.log(`Healthcheck: http://localhost:${PORT}/health`);
   wallet.setInPlayProvider(() => realWorld.totalValue());
   wallet.init();
