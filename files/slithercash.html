@@ -695,7 +695,7 @@ resize();
 let wallet = 0;
 let history = [];
 // Server-side (Phantom / devnet) balance. Only meaningful while SOL.connected.
-const SOL = { connected:false, provider:null, publicKey:null, playerId:null, rate:100, sol:0, credits:0, known:false, pollTimer:null };
+const SOL = { connected:false, provider:null, publicKey:null, playerId:null, rate:100, sol:0, credits:0, known:false, pollTimer:null, limits:null, paused:false };
 
 function loadWallet(){
   try{ const v = parseFloat(localStorage.getItem('sc_wallet_v1')); if(!isNaN(v)) return v; }catch(e){}
@@ -1871,6 +1871,10 @@ async function startGame(){
   buyin = clamp(buyin, CFG.MIN_BUYIN, CFG.MAX_BUYIN);
   buyinInput.value = buyin;
 
+  if(SOL.connected && SOL.limits && buyin > SOL.limits.maxBuyin){
+    alert('The maximum buy-in right now is $' + SOL.limits.maxBuyin + '.');
+    return;
+  }
   if(SOL.connected && buyin > SOL.credits + 1e-9){
     alert('Not enough balance for a $' + buyin.toFixed(2) + ' buy-in. You have $' + SOL.credits.toFixed(2) + '. Deposit devnet SOL first.');
     return;
@@ -2021,7 +2025,12 @@ async function solApi(path, opts){
 function solUpdateUI(){
   const on = SOL.connected;
   solConnectBtn.classList.toggle('sol-hidden', on);
-  solNote.classList.toggle('sol-hidden', on && !solNote.classList.contains('err'));
+  if(on){
+    solNote.textContent = SOL.paused ? 'Buy-ins and withdrawals are paused for a moment. Your balance is safe.' : '';
+    solNote.classList.toggle('err', SOL.paused);
+  }
+  solNote.classList.toggle('sol-hidden', on && !SOL.paused);
+  buyinInput.max = (on && SOL.limits) ? SOL.limits.maxBuyin : CFG.MAX_BUYIN;
   solPanel.classList.toggle('sol-hidden', !on);
   document.getElementById('walletLabel').textContent = on ? 'Wallet Balance' : 'Your Earnings';
   document.getElementById('walletSub').textContent = on ? 'Devnet SOL held by the game server' : 'Practice balance, saved on this device';
@@ -2035,6 +2044,7 @@ function solUpdateUI(){
 }
 
 function solApplyBalance(b){
+  if(typeof b.paused === 'boolean') SOL.paused = b.paused;
   const gained = SOL.known ? b.sol - SOL.sol : 0;
   SOL.sol = b.sol; SOL.credits = b.credits; SOL.known = true;
   if(gained > 1e-9) solToast('Balance up +' + gained.toFixed(4) + ' SOL ($' + (gained * SOL.rate).toFixed(2) + ')');
@@ -2082,6 +2092,8 @@ async function solConnect(){
     SOL.publicKey = publicKey;
     SOL.playerId = login.playerId;
     SOL.rate = login.rate || SOL.rate;
+    SOL.limits = login.limits || null;
+    SOL.paused = !!login.paused;
     SOL.connected = true;
     SOL.known = false;
     solSetNote('');
@@ -2116,6 +2128,7 @@ async function solOpenDeposit(){
     document.getElementById('depositMin').textContent = d.minDepositSol;
     document.getElementById('depositRate').textContent = d.rate;
     SOL.rate = d.rate || SOL.rate;
+    SOL.limits = d.limits || SOL.limits;
     solApplyBalance({ sol: d.solBalance, credits: d.balance });
   }catch(e){
     addrEl.textContent = 'Could not load your deposit address: ' + e.message;
@@ -2155,6 +2168,7 @@ async function solSubmitWithdraw(){
   const amount = parseFloat(withdrawAmount.value);
   if(!isFinite(amount) || amount <= 0){ solSetWithdrawStatus('Enter an amount to withdraw.', 'err'); return; }
   if(amount > SOL.sol + 1e-9){ solSetWithdrawStatus('That is more than your available balance.', 'err'); return; }
+  if(SOL.limits && amount > SOL.limits.maxWithdrawSol + 1e-9){ solSetWithdrawStatus('The maximum per withdrawal is ' + SOL.limits.maxWithdrawSol + ' SOL.', 'err'); return; }
 
   withdrawBusy = true;
   withdrawConfirmBtn.disabled = true;
@@ -2195,7 +2209,8 @@ function solInit(){
   document.getElementById('depositCopyBtn').addEventListener('click', solCopyAddress);
   withdrawConfirmBtn.addEventListener('click', solSubmitWithdraw);
   document.getElementById('withdrawMaxBtn').addEventListener('click', ()=>{
-    withdrawAmount.value = String(Math.floor(SOL.sol * 1e9) / 1e9);
+    const cap = SOL.limits ? SOL.limits.maxWithdrawSol : Infinity; // the server enforces this too
+    withdrawAmount.value = String(Math.floor(Math.min(SOL.sol, cap) * 1e9) / 1e9);
   });
   withdrawAmount.addEventListener('keydown', (e)=>{ if(e.key === 'Enter') solSubmitWithdraw(); });
   [depositModal, withdrawModal].forEach(m=>{

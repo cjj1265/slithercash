@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>SlitherCash Admin</title>
+<style>
+  :root{ --bg:#0a0d0c; --panel:#12181a; --line:rgba(255,255,255,0.08); --text:#eaeee9; --dim:#7c8a82; --gold:#f0c24a; --ok:#6fcf97; --bad:#e6465c; }
+  *{ box-sizing:border-box; margin:0; padding:0; }
+  body{ background:var(--bg); color:var(--text); font:14px/1.45 system-ui, sans-serif; padding:20px; max-width:1100px; margin:0 auto; }
+  h1{ font-size:20px; color:var(--gold); letter-spacing:1px; }
+  h2{ font-size:11px; letter-spacing:1.6px; text-transform:uppercase; color:var(--dim); margin-bottom:10px; }
+  .row{ display:flex; gap:12px; flex-wrap:wrap; margin-top:14px; }
+  .card{ background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px 16px; flex:1 1 260px; min-width:0; }
+  .wide{ flex-basis:100%; }
+  .big{ font:700 22px ui-monospace, Consolas, monospace; }
+  .kv{ display:flex; justify-content:space-between; gap:12px; padding:3px 0; border-bottom:1px solid var(--line); }
+  .kv:last-child{ border-bottom:none; }
+  .kv span:first-child{ color:var(--dim); }
+  .mono{ font-family:ui-monospace, Consolas, monospace; font-size:12px; word-break:break-all; }
+  .ok{ color:var(--ok); } .bad{ color:var(--bad); } .dim{ color:var(--dim); }
+  input{ background:rgba(255,255,255,0.05); border:1px solid var(--line); border-radius:8px; color:var(--text); padding:8px 10px; font:inherit; }
+  button{ background:rgba(255,255,255,0.07); border:1px solid var(--line); border-radius:8px; color:var(--text); padding:8px 14px; font:inherit; font-weight:600; cursor:pointer; }
+  button:hover{ border-color:rgba(240,194,74,0.5); }
+  button.danger{ background:rgba(230,70,92,0.18); border-color:rgba(230,70,92,0.5); }
+  button.good{ background:rgba(111,207,151,0.15); border-color:rgba(111,207,151,0.5); }
+  table{ width:100%; border-collapse:collapse; font-size:12px; }
+  th{ text-align:left; color:var(--dim); font-weight:600; padding:4px 8px 4px 0; }
+  td{ padding:4px 8px 4px 0; border-top:1px solid var(--line); vertical-align:top; }
+  .scroll{ max-height:340px; overflow:auto; }
+  #login{ max-width:420px; margin:80px auto; }
+  #login input{ width:100%; margin:10px 0; }
+  .banner{ padding:10px 14px; border-radius:10px; margin-top:14px; font-weight:600; }
+  .banner.paused{ background:rgba(230,70,92,0.15); border:1px solid rgba(230,70,92,0.5); }
+  .banner.running{ background:rgba(111,207,151,0.1); border:1px solid rgba(111,207,151,0.4); }
+</style>
+</head>
+<body>
+
+<div id="login">
+  <h1>SlitherCash admin</h1>
+  <p class="dim" style="margin-top:6px;">Enter the admin token. It stays in this tab only.</p>
+  <input id="tokenInput" type="password" placeholder="ADMIN_TOKEN" autocomplete="off">
+  <button id="tokenBtn">Sign in</button>
+  <p id="loginErr" class="bad" style="margin-top:10px;"></p>
+</div>
+
+<div id="app" style="display:none;">
+  <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+    <h1>SlitherCash admin</h1>
+    <div><span id="updated" class="dim"></span> <button id="signOut">Sign out</button></div>
+  </div>
+
+  <div id="banner" class="banner"></div>
+
+  <div class="row">
+    <div class="card"><h2>Game wallet</h2><div class="big" id="houseSol">-</div><div class="mono dim" id="houseAddr"></div></div>
+    <div class="card"><h2>Solvency</h2><div class="big" id="solvencyBig">-</div><div id="solvencyKv"></div></div>
+    <div class="card"><h2>Last 24 hours</h2><div class="big" id="out24">-</div><div id="limitsKv"></div></div>
+  </div>
+
+  <div class="row">
+    <div class="card"><h2>Controls</h2>
+      <input id="pauseReason" placeholder="Reason (optional)" style="width:100%; margin-bottom:8px;">
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button id="pauseBtn" class="danger">Pause buy-ins &amp; withdrawals</button>
+        <button id="resumeBtn" class="good">Resume</button>
+        <button id="alertBtn">Send test alert</button>
+      </div>
+      <p class="dim" style="margin-top:8px; font-size:12px;">Pausing never stops deposits or cash-outs from being credited. <span id="alertsNote"></span></p>
+      <p id="controlMsg" style="margin-top:6px;"></p>
+    </div>
+    <div class="card"><h2>In play</h2><div id="playKv"></div></div>
+  </div>
+
+  <div class="row"><div class="card wide"><h2>Unsettled withdrawals</h2><div id="unsettled"></div></div></div>
+  <div class="row"><div class="card wide"><h2>Players (top 200 by balance)</h2><div class="scroll" id="players"></div></div></div>
+  <div class="row"><div class="card wide"><h2>Recent ledger (newest first)</h2><div class="scroll" id="ledger"></div></div></div>
+</div>
+
+<script>
+(function(){
+"use strict";
+const $ = (id) => document.getElementById(id);
+let token = null;
+try { token = sessionStorage.getItem('sc_admin_token'); } catch(e){}
+let timer = null;
+
+function fmt(n, d){ return (Math.round(n * 1e6) / 1e6).toFixed(d === undefined ? 4 : d); }
+function short(s){ return s ? s.slice(0,4) + '…' + s.slice(-4) : ''; }
+function kv(el, rows){
+  el.textContent = '';
+  rows.forEach(([k, v, cls])=>{
+    const d = document.createElement('div'); d.className = 'kv';
+    const a = document.createElement('span'); a.textContent = k;
+    const b = document.createElement('span'); b.textContent = v; if(cls) b.className = cls;
+    d.appendChild(a); d.appendChild(b); el.appendChild(d);
+  });
+}
+function table(el, head, rows){
+  el.textContent = '';
+  if(!rows.length){ el.textContent = 'Nothing.'; el.className += ' dim'; return; }
+  const t = document.createElement('table');
+  const tr = document.createElement('tr');
+  head.forEach(h=>{ const th = document.createElement('th'); th.textContent = h; tr.appendChild(th); });
+  t.appendChild(tr);
+  rows.forEach(r=>{
+    const row = document.createElement('tr');
+    r.forEach(c=>{ const td = document.createElement('td'); td.textContent = c; row.appendChild(td); });
+    t.appendChild(row);
+  });
+  el.appendChild(t);
+}
+async function api(path, opts){
+  const res = await fetch(path, Object.assign({ headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' } }, opts || {}));
+  let data = {}; try { data = await res.json(); } catch(e){}
+  if(!res.ok){ const err = new Error(data.error || ('HTTP ' + res.status)); err.status = res.status; throw err; }
+  return data;
+}
+
+function render(s){
+  const p = s.pause;
+  const banner = $('banner');
+  banner.className = 'banner ' + (p.paused ? 'paused' : 'running');
+  banner.textContent = p.paused
+    ? 'PAUSED — ' + (p.reason || '') + (p.at ? ' (' + new Date(p.at).toLocaleString() + ', by ' + p.by + ')' : '')
+    : 'Running normally';
+
+  $('houseSol').textContent = fmt(s.gameWallet.sol) + ' SOL';
+  $('houseAddr').textContent = s.gameWallet.address + '  ·  ' + s.rpc;
+
+  const v = s.solvency;
+  $('solvencyBig').textContent = (v.surplusSol >= 0 ? '+' : '') + fmt(v.surplusSol) + ' SOL';
+  $('solvencyBig').className = 'big ' + (v.ok ? 'ok' : 'bad');
+  kv($('solvencyKv'), [
+    ['Holds (wallet + unswept)', fmt(v.holdsSol + 0)], ['Owes', fmt(v.owesSol)],
+    ['  player balances', fmt(v.balancesSol)], ['  in play', fmt(v.inPlaySol)], ['  withdrawals in flight', fmt(v.inflightSol)],
+    ['Network fees paid so far', fmt(v.feesPaidSol)],
+    ['Status', v.ok ? 'covered' : 'SHORT', v.ok ? 'ok' : 'bad'],
+  ]);
+
+  $('out24').textContent = fmt(s.withdrawnLast24hSol) + ' SOL';
+  kv($('limitsKv'), [
+    ['Daily cap (all players)', fmt(s.limits.maxGlobalDailySol) + ' SOL'],
+    ['Per player per day', fmt(s.limits.maxPlayerDailySol) + ' SOL'],
+    ['Per withdrawal', fmt(s.limits.maxWithdrawSol) + ' SOL'],
+    ['Max buy-in', '$' + s.limits.maxBuyinCredits],
+    ['Low-wallet alert at', fmt(s.limits.lowWalletSol) + ' SOL'],
+  ]);
+
+  kv($('playKv'), [
+    ['Registered wallets', String(s.playerCount)],
+    ['Real-money snakes alive', String(s.world.realPlayers)],
+    ['Value in play', '$' + fmt(s.world.inPlayCredits, 2)],
+    ['Practice snakes alive', String(s.world.practicePlayers)],
+  ]);
+  $('alertsNote').textContent = s.alertsConfigured ? 'Alerts are on.' : 'Alerts are NOT configured (ALERT_WEBHOOK_URL).';
+  $('alertsNote').className = s.alertsConfigured ? 'ok' : 'bad';
+
+  table($('unsettled'), ['To', 'SOL', 'Status', 'Age (s)', 'Signature'],
+    s.unsettledWithdrawals.map(w => [short(w.to), fmt(w.sol), w.status, String(w.ageSec), w.signature || '']));
+  table($('players'), ['Wallet', 'Deposit address', 'SOL', 'Joined', 'Unswept'],
+    s.players.map(p => [short(p.owner), short(p.address), fmt(p.sol), new Date(p.createdAt).toLocaleString(), p.needsSweep ? 'yes' : '']));
+  table($('ledger'), ['Time', 'Type', 'Detail'],
+    s.recent.map(e => {
+      const { ts, type, ...rest } = e;
+      if(rest.walletId) rest.walletId = short(rest.walletId);   // the full id is a bearer secret; never show it
+      if(rest.playerId) rest.playerId = short(rest.playerId);
+      return [ts ? new Date(ts).toLocaleTimeString() : '', type || 'raw', JSON.stringify(rest)];
+    }));
+  $('updated').textContent = 'updated ' + new Date().toLocaleTimeString();
+}
+
+async function refresh(){
+  try { render(await api('/admin/api/status')); $('loginErr').textContent = ''; }
+  catch(e){
+    if(e.status === 401 || e.status === 429){ signOut(e.message); return; }
+    $('updated').textContent = 'error: ' + e.message;
+  }
+}
+function signIn(){
+  token = $('tokenInput').value.trim();
+  if(!token) return;
+  try { sessionStorage.setItem('sc_admin_token', token); } catch(e){}
+  start();
+}
+function signOut(msg){
+  token = null;
+  try { sessionStorage.removeItem('sc_admin_token'); } catch(e){}
+  clearInterval(timer);
+  $('app').style.display = 'none'; $('login').style.display = 'block';
+  $('loginErr').textContent = typeof msg === 'string' ? msg : '';
+}
+async function start(){
+  $('login').style.display = 'none'; $('app').style.display = 'block';
+  await refresh();
+  clearInterval(timer); timer = setInterval(refresh, 10000);
+}
+async function control(path, body, okText){
+  $('controlMsg').textContent = '';
+  try { await api(path, { method: 'POST', body: JSON.stringify(body || {}) }); $('controlMsg').textContent = okText; $('controlMsg').className = 'ok'; refresh(); }
+  catch(e){ $('controlMsg').textContent = e.message; $('controlMsg').className = 'bad'; }
+}
+
+$('tokenBtn').addEventListener('click', signIn);
+$('tokenInput').addEventListener('keydown', (e)=>{ if(e.key === 'Enter') signIn(); });
+$('signOut').addEventListener('click', ()=> signOut());
+$('pauseBtn').addEventListener('click', ()=>{ if(confirm('Pause buy-ins and withdrawals?')) control('/admin/api/pause', { paused: true, reason: $('pauseReason').value || 'manual' }, 'Paused.'); });
+$('resumeBtn').addEventListener('click', ()=> control('/admin/api/pause', { paused: false }, 'Resumed.'));
+$('alertBtn').addEventListener('click', ()=> control('/admin/api/test-alert', {}, 'Test alert sent (check your channel).'));
+
+if(token) start();
+})();
+</script>
+</body>
+</html>
