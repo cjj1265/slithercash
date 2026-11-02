@@ -1,0 +1,134 @@
+# SlitherCash: guide for a code reviewer
+
+This is for someone reviewing the money-handling code before real funds are put through it. It says what the system is, how money moves, what protects it, what is tested, and where I think the weak spots are. Line numbers are as of commit `18a6fef`; function names are the stable reference.
+
+**Status:** runs on Solana **devnet** (play money) only. It has never run on mainnet. The server refuses to start the wallet on mainnet unless several conditions are met (see "Network guard").
+
+## What it is
+
+A Slither.io-style browser game with a stake. Players deposit SOL, buy in with part of their balance, play on a server-authoritative map, cash out, and withdraw. One Node process serves everything. There is no database; state is one JSON file plus an append-only ledger file.
+
+| File | Role |
+|---|---|
+| `files/solanaWallet.js` | **All the money logic.** Balances, deposits, withdrawals, fee, limits, pause, solvency, alerts. Start here. |
+| `files/index.js` | HTTP API (`/api/*`), admin (`/admin`), WebSocket game sessions. Wires the game to the wallet. |
+| `files/gameServer.js` | Game simulation (`GameWorld`). Movement, collisions, orbs, death, cash-out value. |
+| `files/wsProtocol.js` | A hand-written WebSocket server (no `ws` package). |
+| `files/slithercash.html` | The client. Displays state and asks the server to act; it is not trusted for amounts. |
+| `files/admin.html` | Admin dashboard (token-protected). |
+| `files/tests/` | Test suites and a simulated Solana RPC. |
+
+## Units
+
+- Balances are stored as **integer lamports**, never floats.
+- 1 SOL = 100 game credits, shown as "$". A $5 buy-in is 0.05 SOL.
+- Conversions are at the edges (`solToLamports`, `lamportsToCredits`); credits are floats inside the game simulation.
+
+## How money moves
+
+**1. Identity (login).** `createLoginChallenge` / `completeLogin` (`solanaWallet.js:250`, `:270`). The server issues a one-time message; the wallet signs it with ed25519; the server verifies with Node `crypto`. The `playerId` is `HMAC(masterKey, "player:" + publicKey)`, an unguessable bearer secret derived from the wallet, so the same wallet always gets the same balance back. Challenges are single-use and expire in 5 minutes. The `playerId` is the only credential for balance reads, buy-ins and withdrawals.
+
+**2. Deposit.** Each player has their own deposit address: `Keypair.fromSeed(HMAC(masterKey, "deposit:" + playerId))`. The poller (`pollDeposits` `:776`, every 30s):
+- finds registered addresses holding lamports (finalized commitment),
+- `scanPlayerDeposits` (`:720`) fetches new signatures and reads each transaction; **the amount comes from the on-chain balance change, never from a request**,
+- ignores deposits below 0.01 SOL, and ignores deposits dated before the player's registration (a wiped-store safeguard, see "Past incidents"),
+- adds the credit and the signature to a persisted `processed` set in one `save()`,
+- then `sweepToGameWallet` (`:689`) moves the funds into the game wallet. The sweep fee (5000 lamports) is paid out of the deposit.
+
+**3. Buy-in.** WebSocket `join` with a `walletId` (`index.js:368`). `assertCanBuyIn` (pause + $20 cap), then `deductPlayer` synchronously, then the player is placed in the **real-money world**. No `walletId` means free practice play in a separate world.
+
+**4. Play.** `GameWorld` is authoritative; the client sends only steering and a boost flag. Two rules keep value conserved:
+- boosting burns 1.4 length and drops an orb worth exactly that (`gameServer.js:186-190`);
+- `_kill` (`:324`) drops the dead snake's **entire** length as orbs.
+
+So the total value in a world (`totalValue`, `:98`) never increases. It can only decrease when the 700-orb cap trims old orbs.
+
+**5. Cash-out.** `requestCashout` queues an event; `drainEvents` (`index.js:435`) calls `settleCashout` (`solanaWallet.js:340`), which credits the amount minus the **house fee**: `RAKE_PERCENT` (default 5) of the profit above the buy-in; nothing if cashing out at or below the buy-in. The credit does not depend on the socket still being open. Dropping the connection mid-game **forfeits** the stake.
+
+**6. Withdrawal.** `withdraw` (`:599`). Everything up to and including the balance deduction is **synchronous**, so concurrent requests cannot overspend or reuse a key. Checks, in order: idempotency key, destination equals the wallet that signed in, minimum 0.001 SOL, balance, pause, per-request cap, per-player 24h cap, global 24h cap. Then:
+- deduct and persist a `pending` record;
+- `sendWithdrawal` (`:552`): check the game wallet can pay, build and sign the transaction, **persist the signature before broadcasting**, send, confirm;
+- on a definite failure, refund; on an ambiguous one, `settleWithdrawal` (`:536`) asks the chain and refunds only if the transaction failed or its blockhash expired;
+- `reconcileWithdrawals` (`:668`) finishes anything left half-done after a crash.
+
+## What protects it
+
+- **Limits** (env-configurable): $20 max buy-in; 0.2 SOL per withdrawal; 0.5 SOL per player per 24h; 2 SOL per 24h across everyone.
+- **Pause switch** (`setPaused`): stops buy-ins and withdrawals, never stops crediting deposits or cash-outs. Persisted; `WALLET_PAUSED=1` forces it.
+- **Solvency check** (`computeSolvency` `:398`, `checkSolvency` `:430`, every poll): `holds = game wallet + credited-but-unswept deposits`; `owes = player balances + value in play in the real world + withdrawals in flight`; network fees absorbed by the game wallet are added back. Two failures in a row auto-pause and alert.
+- **Separate worlds:** practice players and bots hold value nobody paid for, so they live in a different `GameWorld` and never share a map with real-money players.
+- **Alerts** (`ALERT_WEBHOOK_URL`, Discord/Slack): pause/resume, insolvency, low game wallet, daily cap hit, unconfirmed withdrawal over 10 minutes, repeated RPC failure, mainnet start.
+- **Network guard** (`verifyNetworkThenStart` `:848`): the wallet stays disabled until the RPC's genesis hash identifies the network. Mainnet additionally needs `ALLOW_MAINNET=1`, a dedicated `DEPOSIT_MASTER_SEED`, and an alert webhook. Unknown networks are refused.
+- **Persistence:** `save()` writes a temp file then renames; a corrupt store makes startup fail rather than start empty. Every deposit, sweep, buy-in, cash-out, withdrawal and pause event is appended to `<data file>.ledger.jsonl` with signatures.
+- **Admin:** `/admin` only exists with `ADMIN_TOKEN` (20+ chars); constant-time comparison; failed attempts rate limited; player ids (bearer secrets) are never shown.
+
+## Tests
+
+From `files/` (Node 18+, after `npm install`):
+
+```
+npm run test:economy   # value conservation in the game simulation (seconds)
+npm run test:fee       # cash-out fee maths (seconds)
+npm run test:wallet    # end-to-end: 92 checks, a few minutes
+```
+
+`test:wallet` runs the real server against a **simulated chain** (`tests/fake-chain-lib.js`: it parses and signature-checks the transactions the wallet builds and applies transfers with fees and rent rules). It covers auth and replay, dust, no double credit, restart persistence, the wiped-store regression, limits, pause (including persistence), admin auth and rate limiting, alerts, world separation, solvency and auto-pause, crash recovery and refunds, the network guard, and a real two-player head-on fight ending in a cash-out with a fee.
+
+**Not covered:** a real chain. The devnet faucet is closed to scripts, so the simulated chain stands in. Before the house fee and network guard were added, the flow was exercised by hand on real devnet with Phantom (deposit, play, cash-out, withdraw, limits, pause, two players, restart). The fee and the later changes have not yet been watched on a real network, and the automated suite never touches a real RPC.
+
+## Past incidents (all fixed; worth knowing the shape)
+
+1. **Boost printed money.** Burned 1.4 length, dropped 3.2 length of orb 80% of the time.
+2. **Buy-ins under $1 cashed out at $1.** A length floor of 8 was worth more than a small stake.
+3. **Wiped store re-credited old deposits.** After a restart without a persistent disk, the first scan of a deposit address read its entire on-chain history. Fixed by ignoring deposits older than the registration time.
+4. **Practice snakes could feed real players.** They shared a map. Fixed with separate worlds.
+5. **Death silently kept ~47% of a stake.** Replaced by an explicit, disclosed fee on profit.
+
+## Known gaps and risks (my honest list)
+
+- **Never run on mainnet**, and the automated tests use a simulated chain.
+- **Hot wallet.** `GAME_WALLET_SECRET` is an environment variable on the host. Whoever gets it can drain the game wallet; the app's withdrawal limits do not apply to someone holding the key. The only mitigation is keeping the balance small.
+- **Single instance only.** State lives in process memory plus one file. Two instances would double-process deposits and withdrawals. Render must run exactly one.
+- **`wsProtocol.js` is unhardened.** No maximum frame size (a client can make it buffer without bound), no idle timeouts, no per-connection message rate limit, no origin check, and no support for fragmented messages.
+- **No collusion or multi-account detection.** Friends can feed each other (it is only a transfer, and the fee applies to profit), and nothing stops one person running many wallets.
+- **Dust.** Deposits under 0.01 SOL are not credited but are swept into the game wallet along with the next real deposit, so the house keeps them.
+- **RPC trust.** Deposit amounts come from the RPC's answer. A malicious or buggy RPC could misreport. Finalized commitment narrows but does not remove this.
+- **Float credits in the simulation.** Lamports are exact, but the game works in float credits; conversions round to the nearest lamport.
+- **Bearer secret.** The `playerId` is a bearer token held in the page's memory. Cross-site scripting on the page would expose it. Withdrawals can only go to the signing wallet, which limits what a stolen id can do.
+- **Legal and compliance** are out of scope here and are the owner's responsibility.
+
+## Where I would like a second opinion
+
+1. Any path where a credit applies twice or a debit is skipped: the deposit scan, `drainEvents`/`settleCashout`, and the refund paths.
+2. Withdrawal crash safety: is "persist the signature before broadcast; refund only when the chain proves failure or expiry" sound? In particular `settleWithdrawal` treating `getBlockHeight() > lastValidBlockHeight` as proof the transaction can never land.
+3. The login flow: challenge parsing, replay, the `playerId` derivation, and the ed25519 verification in `completeLogin`.
+4. The solvency formula and the fee add-back, and whether two consecutive failures is the right trigger.
+5. The game economy: can a player extract more than their stake plus other players' stakes (simultaneous kills, wall deaths, the orb cap, boost edge cases, anything in `_kill` and `_resolveHeadOnCollisions`)?
+6. `wsProtocol.js` hardening.
+7. The admin surface (`index.js:225`, `:239`).
+8. Race conditions between the async withdrawal flow, the poller and the game tick, given everything runs on one event loop.
+
+## Configuration
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `GAME_WALLET_SECRET` | none | JSON array of the game wallet's 64-byte secret key. Without it the wallet is off. |
+| `DEPOSIT_MASTER_SEED` | derived from the wallet secret | Long random string for deriving deposit addresses and player ids. Required on mainnet. |
+| `SOLANA_RPC_URL` | devnet public RPC | The network is read from the RPC itself. |
+| `WALLET_DATA_FILE` | `files/wallet-data.json` | Balances. Must be on a persistent disk on Render. |
+| `ADMIN_TOKEN` | none | 20+ chars; enables `/admin`. |
+| `ALERT_WEBHOOK_URL` | none | Discord or Slack webhook. Required on mainnet. |
+| `ALLOW_MAINNET` | unset | Must be `1` to run on mainnet. |
+| `RAKE_PERCENT` | `5` | House fee as a percent of cash-out profit (0 to 50). |
+| `MAX_WITHDRAW_SOL` | `0.2` | Per withdrawal. |
+| `MAX_PLAYER_DAILY_WITHDRAW_SOL` | `0.5` | Per player, rolling 24h. |
+| `MAX_DAILY_WITHDRAW_SOL` | `2` | All players, rolling 24h. |
+| `MAX_BUYIN_CREDITS` | `20` | Largest stake in $. |
+| `LOW_WALLET_SOL` | `0.2` | Alert when the game wallet drops below this. |
+| `INSOLVENCY_TOLERANCE_SOL` | `0.02` | Shortfall allowed before auto-pause. |
+| `WALLET_PAUSED` | unset | `1` forces the pause on. |
+| `DEPOSIT_POLL_MS` | `30000` | Deposit poll interval. |
+| `TRUST_PROXY` | unset | `1` to rate limit by `X-Forwarded-For` behind Render. |
+| `CORS_ORIGIN` | none | Allowed origins for `/api` (same-origin needs none). |
+| `WITHDRAW_RATE_MAX` | `6` | Withdraw requests per player per minute. |
+| `NUM_BOTS` | `0` | Bots in the **practice** world only. |
