@@ -157,7 +157,7 @@ async function handleApi(req, res) {
 
     // Public and harmless: lets the page say "Devnet" or not before anyone connects a wallet.
     if (route === 'GET /api/config') {
-      sendJson(res, 200, { enabled: wallet.isEnabled(), network: wallet.getNetwork(), paused: wallet.isEnabled() ? wallet.isPaused() : false });
+      sendJson(res, 200, { enabled: wallet.isEnabled(), network: wallet.getNetwork(), creditsPerSol: wallet.CREDITS_PER_SOL, paused: wallet.isEnabled() ? wallet.isPaused() : false });
       return;
     }
     if (!wallet.isEnabled()) throw new wallet.WalletError('wallet_disabled', 'Solana wallet is not configured on this server', 503);
@@ -258,7 +258,7 @@ async function handleAdmin(req, res) {
     const route = req.method + ' ' + url.pathname;
     if (route === 'GET /admin/api/status') {
       const status = await wallet.getAdminStatus();
-      status.world = { realPlayers: realWorld.snakes.size, inPlayCredits: realWorld.totalValue(), practicePlayers: practiceWorld.snakes.size };
+      status.world = { realPlayers: realWorld.snakes.size, inPlayCredits: realWorld.totalValue(), inPlaySol: realWorld.totalValue() / wallet.CREDITS_PER_SOL, practicePlayers: practiceWorld.snakes.size };
       sendJson(res, 200, status);
     } else if (route === 'POST /admin/api/pause') {
       const body = await readJson(req, 2048);

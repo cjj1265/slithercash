@@ -383,7 +383,18 @@ function getPublicLimits() {
 function assertCanBuyIn(credits) {
   requireEnabled();
   if (isPaused()) throw new WalletError('paused', 'Play with real balance is temporarily paused. Your balance is safe.', 503);
-  if (credits > LIMITS.maxBuyinCredits) throw new WalletError('over_limit', 'The maximum buy-in is $' + LIMITS.maxBuyinCredits, 403);
+  if (credits > LIMITS.maxBuyinCredits) throw new WalletError('over_limit', 'The maximum buy-in is ' + formatCredits(LIMITS.maxBuyinCredits), 403);
+}
+
+/**
+ * Credits are an internal unit (1 SOL = CREDITS_PER_SOL). On devnet they are shown as play-money
+ * dollars; on mainnet they are real SOL, so they are shown as SOL and never as a dollar figure the
+ * server cannot know.
+ */
+function formatCredits(credits) {
+  return network === 'mainnet-beta'
+    ? '◎' + (credits / CREDITS_PER_SOL).toFixed(3)
+    : '$' + credits;
 }
 
 function setInPlayProvider(fn) { inPlayProvider = fn; }
@@ -482,6 +493,7 @@ async function getAdminStatus() {
       maxPlayerDailySol: lamportsToSol(LIMITS.maxPlayerDailyLamports),
       maxGlobalDailySol: lamportsToSol(LIMITS.maxGlobalDailyLamports),
       maxBuyinCredits: LIMITS.maxBuyinCredits,
+      maxBuyinSol: LIMITS.maxBuyinCredits / CREDITS_PER_SOL,
       lowWalletSol: lamportsToSol(LIMITS.lowWalletLamports),
       toleranceSol: lamportsToSol(LIMITS.insolvencyToleranceLamports),
     },

@@ -143,7 +143,7 @@ function render(s){
 
   $('earnBig').textContent = fmt(s.earnings.feesCollectedSol) + ' SOL';
   kv($('earnKv'), [
-    ['Fees collected (all time)', '$' + fmt(s.earnings.feesCollectedSol * 100, 2)],
+    ['Fees collected (all time)', fmt(s.earnings.feesCollectedSol) + ' SOL'],
     ['House fee', s.earnings.rakePercent + '% of cash-out profit'],
     ['Network costs paid', fmt(s.earnings.networkCostsSol) + ' SOL'],
   ]);
@@ -153,14 +153,14 @@ function render(s){
     ['Daily cap (all players)', fmt(s.limits.maxGlobalDailySol) + ' SOL'],
     ['Per player per day', fmt(s.limits.maxPlayerDailySol) + ' SOL'],
     ['Per withdrawal', fmt(s.limits.maxWithdrawSol) + ' SOL'],
-    ['Max buy-in', '$' + s.limits.maxBuyinCredits],
+    ['Max buy-in', fmt(s.limits.maxBuyinSol) + ' SOL'],
     ['Low-wallet alert at', fmt(s.limits.lowWalletSol) + ' SOL'],
   ]);
 
   kv($('playKv'), [
     ['Registered wallets', String(s.playerCount)],
     ['Real-money snakes alive', String(s.world.realPlayers)],
-    ['Value in play', '$' + fmt(s.world.inPlayCredits, 2)],
+    ['Value in play', fmt(s.world.inPlaySol) + ' SOL'],
     ['Practice snakes alive', String(s.world.practicePlayers)],
   ]);
   $('alertsNote').textContent = s.alertsConfigured ? 'Alerts are on.' : 'Alerts are NOT configured (ALERT_WEBHOOK_URL).';

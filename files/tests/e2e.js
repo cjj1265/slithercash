@@ -264,7 +264,7 @@ const errOf = (state) => (state.msgs.find((m) => m.t === 'error') || {}).message
 
   console.log('\n== game: buy-in cap, world separation, cash-out ==');
   const over = await wsOpen(pidA, 25); // cap is $20
-  check('buy-in above the $20 cap rejected with a clear message', /maximum buy-in/i.test(errOf(over) || ''), over.msgs);
+  check('buy-in above the $20 cap rejected with a clear message', /maximum buy-in/i.test(errOf(over) || '') && (errOf(over) || '').includes('$20'), over.msgs);
   over.ws.close();
   check('rejected buy-in left balance alone', near((await balanceOf(pidA)).sol, 0.05));
   const unknown = await wsOpen('ff'.repeat(32), 5);
@@ -488,6 +488,12 @@ const errOf = (state) => (state.msgs.find((m) => m.t === 'error') || {}).message
   await startServer(game, guardData, { FAKE_GENESIS: 'mainnet', ALLOW_MAINNET: '1' });
   const cm = (await http_('GET', '/api/config')).json;
   check('mainnet with every requirement met -> starts, reports mainnet-beta', cm.enabled === true && cm.network === 'mainnet-beta', cm);
+  check('config reports the internal credits-per-SOL scale', cm.creditsPerSol === 100, cm);
+  const LM = await login(A);
+  const capJoin = await wsOpen(LM.res.json.playerId, 25);
+  const capMsg = errOf(capJoin) || '';
+  check('on mainnet a limit message is in SOL, never a dollar figure', capMsg.includes('◎0.200') && !capMsg.includes('$'), capMsg);
+  capJoin.ws.close();
   check('mainnet start sends a loud alert', await alertSeen('MAINNET'), alerts);
   const am = await admin('GET', '/admin/api/status', null, 'x'.repeat(10));
   check('(admin still locked on this instance without a token)', am.status === 404 || am.status === 401);

@@ -414,7 +414,7 @@
       <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" fill="#241a08" opacity="0.14"/><path d="M12 6v12M15.2 8.6c0-1.1-1.2-2-2.9-2-1.9 0-3.1.9-3.1 2.1 0 1.5 1.4 1.9 3.1 2.3 2 .5 3.1 1 3.1 2.4 0 1.3-1.3 2.2-3.1 2.2-1.8 0-3-0.9-3.1-2.1" stroke="#241a08" stroke-width="1.4" stroke-linecap="round"/></svg>
     </div>
     <div id="cashValueWrap">
-      <div id="cashCounter"><span class="sym">$</span><span id="cashValue">0.00</span></div>
+      <div id="cashCounter"><span class="sym" id="cashSym">$</span><span id="cashValue">0.00</span></div>
       <div id="rankLine">RANK <b id="rankValue">-</b> / <b id="aliveValue">-</b></div>
     </div>
   </div>
@@ -542,7 +542,7 @@
   <div class="sol-box">
     <button type="button" class="sol-x" data-sol-close aria-label="Close">&times;</button>
     <div class="sol-title">Deposit SOL</div>
-    <div class="sol-sub"><span id="depositNet">Devnet only &middot; </span>minimum <span id="depositMin">0.01</span> SOL &middot; 1 SOL = $<span id="depositRate">100</span></div>
+    <div class="sol-sub"><span id="depositNet">Devnet only &middot; </span>minimum <span id="depositMin">0.01</span> SOL<span id="depositRateWrap"> &middot; 1 SOL = $<span id="depositRate">100</span></span></div>
     <img id="depositQr" alt="Deposit address QR code" width="200" height="200">
     <div class="sol-addrbox" id="depositAddr">Loading&hellip;</div>
     <button type="button" class="btn btn-gold" id="depositCopyBtn" style="margin-top:12px;">Copy address</button>
@@ -642,7 +642,14 @@ function dist2(x1,y1,x2,y2){ const dx=x1-x2, dy=y1-y2; return dx*dx+dy*dy; }
 function normAngle(a){ while(a>Math.PI)a-=Math.PI*2; while(a<-Math.PI)a+=Math.PI*2; return a; }
 function easeOutCubic(t){ return 1 - Math.pow(1-t, 3); }
 function toDollars(length){ return length / CFG.LEN_PER_DOLLAR; }
-function fmtMoney(length){ return '$' + toDollars(length).toFixed(2); }
+/* Game values are "credits". Practice play, and everything on devnet, shows them as play-money dollars.
+   With a wallet connected on MAINNET they are real SOL, so they are shown as SOL (1 SOL = SOL.rate credits)
+   and never as a dollar figure the page cannot know. */
+function realMoney(){ return solIsMain() && SOL.connected; }
+function cashSym(){ return realMoney() ? '◎' : '$'; }
+function cashNum(credits){ return realMoney() ? (credits / SOL.rate).toFixed(3) : credits.toFixed(2); }
+function fmtCash(credits){ return cashSym() + cashNum(credits); }
+function fmtMoney(length){ return fmtCash(toDollars(length)); }
 function startLenForBuyin(buyin){
   const b = clamp(buyin, CFG.MIN_BUYIN, CFG.MAX_BUYIN);
   return Math.max(8, b * CFG.LEN_PER_DOLLAR);
@@ -678,6 +685,7 @@ const hud = document.getElementById('hud');
 const leaderboardEl = document.getElementById('leaderboard');
 const lbList = document.getElementById('lbList');
 const cashValue = document.getElementById('cashValue');
+const cashSymEl = document.getElementById('cashSym');
 const rankValue = document.getElementById('rankValue');
 const aliveValue = document.getElementById('aliveValue');
 const boostBtn = document.getElementById('boostBtn');
@@ -717,7 +725,7 @@ function pushHistory(entry){
 }
 function renderWalletUI(){
   const amt = document.getElementById('walletAmount');
-  if(amt) amt.textContent = '$'+(SOL.connected ? SOL.credits : wallet).toFixed(2);
+  if(amt) amt.textContent = fmtCash(SOL.connected ? SOL.credits : wallet);
   const list = document.getElementById('walletHistory');
   if(!list) return;
   list.innerHTML = '';
@@ -728,7 +736,7 @@ function renderWalletUI(){
     const net = h.net;
     const sign = net>=0 ? '+' : '-';
     const netClass = net>=0 ? 'pos' : 'neg';
-    row.innerHTML = '<span>$'+h.buyin.toFixed(2)+' &rarr; $'+h.result.toFixed(2)+'</span><span class="'+netClass+'">'+sign+'$'+Math.abs(net).toFixed(2)+'</span>';
+    row.innerHTML = '<span>'+fmtCash(h.buyin)+' &rarr; '+fmtCash(h.result)+'</span><span class="'+netClass+'">'+sign+fmtCash(Math.abs(net))+'</span>';
     list.appendChild(row);
   });
 }
@@ -1003,7 +1011,7 @@ function animateCountUp(el, from, to, duration){
   function step(t){
     const p = clamp((t-start)/duration, 0, 1);
     const v = from + (to-from)*easeOutCubic(p);
-    el.textContent = '$' + v.toFixed(2);
+    el.textContent = fmtCash(v);
     if(p<1) requestAnimationFrame(step);
   }
   requestAnimationFrame(step);
@@ -1397,7 +1405,8 @@ function drawMinimap(){
 let hudAccum = 0;
 function updateHUDAndLeaderboard(dt){
   hudAccum += dt;
-  cashValue.textContent = toDollars(player.length).toFixed(2);
+  cashSymEl.textContent = cashSym();
+  cashValue.textContent = cashNum(toDollars(player.length));
   if(!cashOutBtn.classList.contains('armed')){ cashOutAmount.textContent = fmtMoney(player.length); }
 
   if(hudAccum < 0.25) return;
@@ -1831,8 +1840,8 @@ function handleNetCashout(msg){
   if(showFee){
     const pct = SOL.limits && SOL.limits.rakePercent;
     document.getElementById('cashoutFeeLabel').textContent = 'House fee' + (pct ? ' (' + pct + '% of profit)' : '');
-    document.getElementById('cashoutFee').textContent = '-$' + msg.fee.toFixed(2);
-    document.getElementById('cashoutNet').textContent = '$' + msg.net.toFixed(2);
+    document.getElementById('cashoutFee').textContent = '-' + fmtCash(msg.fee);
+    document.getElementById('cashoutNet').textContent = fmtCash(msg.net);
   }
 
   document.getElementById('cashoutBestRank').textContent = '#' + msg.bestRank;
@@ -1884,17 +1893,18 @@ document.getElementById('skinDoneBtn').addEventListener('click', ()=>{
 /* ============================== START / RESTART ============================== */
 async function startGame(){
   const name = nameInput.value.trim() || randName();
-  let buyin = parseFloat(buyinInput.value);
+  // The field is in SOL on mainnet and in play-money dollars otherwise; the server always works in credits.
+  let buyin = parseFloat(buyinInput.value) * (buyinInSol ? SOL.rate : 1);
   if(isNaN(buyin) || buyin <= 0) buyin = CFG.DEFAULT_BUYIN;
   buyin = clamp(buyin, CFG.MIN_BUYIN, CFG.MAX_BUYIN);
-  buyinInput.value = buyin;
+  buyinInput.value = buyinInSol ? +(buyin / SOL.rate).toFixed(4) : buyin;
 
-  if(SOL.connected && SOL.limits && buyin > SOL.limits.maxBuyin){
-    alert('The maximum buy-in right now is $' + SOL.limits.maxBuyin + '.');
+  if(SOL.connected && SOL.limits && buyin > SOL.limits.maxBuyin + 1e-9){
+    alert('The maximum buy-in right now is ' + fmtCash(SOL.limits.maxBuyin) + '.');
     return;
   }
   if(SOL.connected && buyin > SOL.credits + 1e-9){
-    alert('Not enough balance for a $' + buyin.toFixed(2) + ' buy-in. You have $' + SOL.credits.toFixed(2) + '. Deposit SOL first.');
+    alert('Not enough balance for a ' + fmtCash(buyin) + ' buy-in. You have ' + fmtCash(SOL.credits) + '. Deposit SOL first.');
     return;
   }
 
@@ -2020,11 +2030,29 @@ function solSetNote(text, isErr){
   solNote.classList.toggle('err', !!isErr);
 }
 function solIsMain(){ return SOL.network === 'mainnet-beta'; }
+
+/** The buy-in box is in SOL while real money is in play and in play-money dollars otherwise. */
+let buyinInSol = false;
+function syncBuyinField(){
+  const sym = document.querySelector('.buyin-sym');
+  const want = realMoney();
+  if(want !== buyinInSol){ // the mode just changed: carry the amount across
+    const credits = (parseFloat(buyinInput.value) || CFG.DEFAULT_BUYIN) * (buyinInSol ? SOL.rate : 1);
+    buyinInSol = want;
+    buyinInput.value = want ? +(credits / SOL.rate).toFixed(4) : credits;
+  }
+  const maxCredits = (SOL.connected && SOL.limits) ? SOL.limits.maxBuyin : CFG.MAX_BUYIN;
+  sym.textContent = want ? '◎' : '$';
+  buyinInput.min = want ? CFG.MIN_BUYIN / SOL.rate : CFG.MIN_BUYIN;
+  buyinInput.max = want ? maxCredits / SOL.rate : maxCredits;
+  buyinInput.step = want ? 0.01 : 0.5;
+}
 function solIdleNote(){ return (solIsMain() ? '' : 'Devnet only · ') + 'connect to play with deposited SOL'; }
 /** Words that differ between play-money devnet and real mainnet. */
 function solApplyNetwork(network){
   if(network) SOL.network = network;
   document.getElementById('depositNet').textContent = solIsMain() ? '' : 'Devnet only · ';
+  document.getElementById('depositRateWrap').classList.toggle('sol-hidden', solIsMain()); // "1 SOL = $100" is a play-money rule, not a price
   document.getElementById('depositHint').textContent = solIsMain()
     ? 'Send SOL to this address from any wallet. Your balance updates within about a minute.'
     : 'Send devnet SOL to this address from any wallet (switch Phantom to Devnet in its developer settings). Your balance updates within about a minute.';
@@ -2059,7 +2087,8 @@ function solUpdateUI(){
     solNote.classList.toggle('err', SOL.paused);
   }
   solNote.classList.toggle('sol-hidden', on && !SOL.paused);
-  buyinInput.max = (on && SOL.limits) ? SOL.limits.maxBuyin : CFG.MAX_BUYIN;
+  syncBuyinField();
+  document.querySelector('.co-icon').textContent = cashSym();
   const rakeNote = document.getElementById('rakeNote');
   const rake = on && SOL.limits ? SOL.limits.rakePercent : 0;
   rakeNote.classList.toggle('sol-hidden', !(rake > 0));
@@ -2069,7 +2098,9 @@ function solUpdateUI(){
   document.getElementById('walletSub').textContent = on ? (solIsMain() ? 'SOL held by the game server' : 'Devnet SOL held by the game server') : 'Practice balance, saved on this device';
   if(on){
     document.getElementById('solBalance').textContent = SOL.sol.toFixed(4) + ' SOL';
+    // On devnet this row shows the play-money dollars. On mainnet it is hidden: the SOL line above is the truth.
     document.getElementById('solUsd').textContent = '$' + SOL.credits.toFixed(2);
+    document.getElementById('solUsd').closest('.sol-row').classList.toggle('sol-hidden', solIsMain());
     document.getElementById('solWalletAddr').textContent = solShort(SOL.publicKey);
     document.getElementById('withdrawAvail').textContent = SOL.sol.toFixed(4) + ' SOL';
   }
@@ -2080,7 +2111,7 @@ function solApplyBalance(b){
   if(typeof b.paused === 'boolean') SOL.paused = b.paused;
   const gained = SOL.known ? b.sol - SOL.sol : 0;
   SOL.sol = b.sol; SOL.credits = b.credits; SOL.known = true;
-  if(gained > 1e-9) solToast('Balance up +' + gained.toFixed(4) + ' SOL ($' + (gained * SOL.rate).toFixed(2) + ')');
+  if(gained > 1e-9) solToast('Balance up +' + gained.toFixed(4) + ' SOL' + (solIsMain() ? '' : ' ($' + (gained * SOL.rate).toFixed(2) + ')'));
   solUpdateUI();
 }
 
@@ -2262,7 +2293,7 @@ function solInit(){
   solApplyNetwork();
   solUpdateUI();
   // Learn the network up front so the menu never says "Devnet" on a real-money server.
-  fetch('/api/config').then(r => r.json()).then(c => { solApplyNetwork(c.network); solUpdateUI(); }).catch(()=>{});
+  fetch('/api/config').then(r => r.json()).then(c => { if(c.creditsPerSol) SOL.rate = c.creditsPerSol; solApplyNetwork(c.network); solUpdateUI(); }).catch(()=>{});
 }
 
 /* ============================== LOADING SCREEN ============================== */
