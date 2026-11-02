@@ -347,7 +347,7 @@ attachWebSocketServer(httpServer, (conn, req) => {
       if (session.world.snakes.has(session.playerId)) {
         session.world.removePlayer(session.playerId);
         if (walletByPlayer.has(session.playerId)) {
-          wallet.logLedger('forfeit_disconnect', { walletId: walletByPlayer.get(session.playerId), snake: session.playerId });
+          wallet.logLedger('forfeit_disconnect', { walletId: walletByPlayer.get(session.playerId).walletId, snake: session.playerId });
           walletByPlayer.delete(session.playerId);
         }
       }
@@ -388,7 +388,7 @@ function handleMessage(connId, msg) {
           session.conn.send({ t: 'error', message });
           return;
         }
-        walletByPlayer.set(playerId, walletId);
+        walletByPlayer.set(playerId, { walletId, buyin });
         wallet.logLedger('buyin', { walletId, snake: playerId, credits: buyin });
         world = realWorld;
       }
@@ -436,13 +436,16 @@ function drainEvents(world) {
   if (world.events.length === 0) return;
   for (const evt of world.events) {
     // Settle the stake first, even if the socket is already gone.
-    const walletId = walletByPlayer.get(evt.targetId);
-    if (walletId) {
+    const stake = walletByPlayer.get(evt.targetId);
+    if (stake) {
+      const walletId = stake.walletId;
       walletByPlayer.delete(evt.targetId);
       if (evt.type === 'cashout_result') {
         try {
-          wallet.creditPlayer(walletId, evt.data.amount / wallet.CREDITS_PER_SOL);
-          wallet.logLedger('cashout', { walletId, snake: evt.targetId, buyin: evt.data.buyin, credits: evt.data.amount });
+          // The house fee comes off the profit above what this player paid in. The client is told the split.
+          const r = wallet.settleCashout(walletId, evt.data.amount, stake.buyin);
+          evt.data.fee = r.feeCredits;
+          evt.data.net = r.netCredits;
         } catch (e) {
           console.error('[wallet] FAILED to credit cash-out of ' + evt.data.amount + ' credits to ' + walletId + ':', e.message);
         }

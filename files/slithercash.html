@@ -479,6 +479,7 @@
         <span class="buyin-sym">$</span>
         <input id="buyinInput" type="number" min="1" max="500" step="0.5" value="5" inputmode="decimal">
       </div>
+      <div class="sol-note sol-hidden" id="rakeNote" style="text-align:left;"></div>
     </div>
 
     <button class="btn btn-gold" id="playBtn">Buy In &amp; Play</button>
@@ -512,6 +513,8 @@
     <div class="tagline">You walked away with your stack.</div>
     <div id="cashoutStats">
       <div class="row"><span>Final Bankroll</span><span id="cashoutFinalCash">$0.00</span></div>
+      <div class="row sol-hidden" id="cashoutFeeRow"><span id="cashoutFeeLabel">House fee</span><span id="cashoutFee">-$0.00</span></div>
+      <div class="row sol-hidden" id="cashoutNetRow"><span>You received</span><span id="cashoutNet">$0.00</span></div>
       <div class="row"><span>Best Rank Reached</span><span id="cashoutBestRank">-</span></div>
       <div class="row"><span>Coins Collected</span><span id="cashoutCoinsEaten">0</span></div>
     </div>
@@ -1815,7 +1818,18 @@ function finalizeNetDeathScreen(){
 function handleNetCashout(msg){
   running = false;
   if(!SOL.connected){ wallet += msg.amount; saveWallet(); } // wallet mode: the server already credited the balance
-  pushHistory({ buyin: msg.buyin, result: msg.amount, net: msg.amount - msg.buyin, ts: Date.now() });
+  const received = (SOL.connected && typeof msg.net === 'number') ? msg.net : msg.amount; // after the house fee, in wallet mode
+  pushHistory({ buyin: msg.buyin, result: received, net: received - msg.buyin, ts: Date.now() });
+
+  const showFee = SOL.connected && typeof msg.fee === 'number' && msg.fee > 0;
+  document.getElementById('cashoutFeeRow').classList.toggle('sol-hidden', !showFee);
+  document.getElementById('cashoutNetRow').classList.toggle('sol-hidden', !showFee);
+  if(showFee){
+    const pct = SOL.limits && SOL.limits.rakePercent;
+    document.getElementById('cashoutFeeLabel').textContent = 'House fee' + (pct ? ' (' + pct + '% of profit)' : '');
+    document.getElementById('cashoutFee').textContent = '-$' + msg.fee.toFixed(2);
+    document.getElementById('cashoutNet').textContent = '$' + msg.net.toFixed(2);
+  }
 
   document.getElementById('cashoutBestRank').textContent = '#' + msg.bestRank;
   document.getElementById('cashoutCoinsEaten').textContent = msg.coinsEaten;
@@ -2042,6 +2056,10 @@ function solUpdateUI(){
   }
   solNote.classList.toggle('sol-hidden', on && !SOL.paused);
   buyinInput.max = (on && SOL.limits) ? SOL.limits.maxBuyin : CFG.MAX_BUYIN;
+  const rakeNote = document.getElementById('rakeNote');
+  const rake = on && SOL.limits ? SOL.limits.rakePercent : 0;
+  rakeNote.classList.toggle('sol-hidden', !(rake > 0));
+  if(rake > 0) rakeNote.textContent = 'House fee: ' + rake + '% of your profit when you cash out. Nothing if you cash out at your buy-in or less.';
   solPanel.classList.toggle('sol-hidden', !on);
   document.getElementById('walletLabel').textContent = on ? 'Wallet Balance' : 'Your Earnings';
   document.getElementById('walletSub').textContent = on ? (solIsMain() ? 'SOL held by the game server' : 'Devnet SOL held by the game server') : 'Practice balance, saved on this device';

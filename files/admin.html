@@ -57,6 +57,7 @@
   <div class="row">
     <div class="card"><h2>Game wallet</h2><div class="big" id="houseSol">-</div><div class="mono dim" id="houseAddr"></div></div>
     <div class="card"><h2>Solvency</h2><div class="big" id="solvencyBig">-</div><div id="solvencyKv"></div></div>
+    <div class="card"><h2>House earnings</h2><div class="big" id="earnBig">-</div><div id="earnKv"></div></div>
     <div class="card"><h2>Last 24 hours</h2><div class="big" id="out24">-</div><div id="limitsKv"></div></div>
   </div>
 
@@ -138,6 +139,13 @@ function render(s){
     ['  player balances', fmt(v.balancesSol)], ['  in play', fmt(v.inPlaySol)], ['  withdrawals in flight', fmt(v.inflightSol)],
     ['Network fees paid so far', fmt(v.feesPaidSol)],
     ['Status', v.ok ? 'covered' : 'SHORT', v.ok ? 'ok' : 'bad'],
+  ]);
+
+  $('earnBig').textContent = fmt(s.earnings.feesCollectedSol) + ' SOL';
+  kv($('earnKv'), [
+    ['Fees collected (all time)', '$' + fmt(s.earnings.feesCollectedSol * 100, 2)],
+    ['House fee', s.earnings.rakePercent + '% of cash-out profit'],
+    ['Network costs paid', fmt(s.earnings.networkCostsSol) + ' SOL'],
   ]);
 
   $('out24').textContent = fmt(s.withdrawnLast24hSol) + ' SOL';

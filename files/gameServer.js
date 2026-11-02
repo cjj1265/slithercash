@@ -323,9 +323,15 @@ class GameWorld {
 
   _kill(snake, killerName) {
     snake.alive = false;
-    for (let i = 0; i < snake.points.length; i += 3) {
-      const p = snake.points[i];
-      this.orbs.push(spawnOrb(p.x + rand(-8, 8), p.y + rand(-8, 8), 2));
+    // The whole stake goes back on the map: the orbs together are worth exactly the snake's length
+    // (an orb of value v adds GROW_PER_ORB * v length). Nothing vanishes with a death, so the only
+    // house income is the explicit fee taken at cash-out, and a loser's money reaches the winners.
+    const dropAt = [];
+    for (let i = 0; i < snake.points.length; i += 3) dropAt.push(snake.points[i]);
+    if (dropAt.length === 0) dropAt.push(snake.head);
+    const perOrb = snake.length / CFG.GROW_PER_ORB / dropAt.length;
+    for (const p of dropAt) {
+      this.orbs.push(spawnOrb(p.x + rand(-8, 8), p.y + rand(-8, 8), perOrb));
     }
     if (this.orbs.length > CFG.ORB_CAP) this.orbs.splice(0, this.orbs.length - CFG.ORB_CAP);
 
