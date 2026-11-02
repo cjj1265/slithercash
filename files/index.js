@@ -459,6 +459,12 @@ function handleMessage(connId, msg) {
       // from anything the client claims. No walletId means free practice play.
       let walletId = null;
       let world = practiceWorld;
+      // With the wallet on, nobody plays without a signed-in wallet balance. Practice play only exists
+      // on a server that has no wallet configured at all.
+      if (wallet.isEnabled() && typeof msg.walletId !== 'string') {
+        session.conn.send({ t: 'error', message: 'Connect your Phantom wallet to play.' });
+        return;
+      }
       if (typeof msg.walletId === 'string') {
         walletId = msg.walletId;
         try {

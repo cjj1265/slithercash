@@ -198,18 +198,6 @@ const errOf = (state) => (state.msgs.find((m) => m.t === 'error') || {}).message
   check('this site\'s own page can', (await handshake('http://127.0.0.1:' + PORT)) === 101);
   check('a non-browser client (no Origin) can', (await handshake()) === 101);
 
-  const evil = await wsOpen(undefined, 5, '<img src=x onerror=alert(1)>');
-  await sleep(600);
-  const evilSnap = evil.snaps[evil.snaps.length - 1];
-  const evilName = evilSnap && evilSnap.snakes.find((s) => s.id === evil.id).name;
-  check('markup in a player name is stripped by the server', evil.id && evilName && !/[<>"'&]/.test(evilName) && evilName.length <= 16, evilName);
-  evil.ws.close();
-  const junk = await wsOpen(undefined, 5, '\u0000\u0007‮  ');
-  await sleep(300);
-  const junkSnap = junk.snaps[junk.snaps.length - 1];
-  check('a name made only of control characters becomes the default', junkSnap && junkSnap.snakes.find((s) => s.id === junk.id).name === 'Player');
-  junk.ws.close();
-
   const waitClose = (ws, ms) => new Promise((resolve) => { const t = setTimeout(() => resolve(null), ms); ws.onclose = (e) => { clearTimeout(t); resolve(e.code); }; });
   const lurker = new WebSocket('ws://127.0.0.1:' + PORT); // connects, never joins
   await new Promise((r) => { lurker.onopen = r; });
@@ -276,11 +264,11 @@ const errOf = (state) => (state.msgs.find((m) => m.t === 'error') || {}).message
 
   const real = await wsOpen(pidA, 5);
   const practice = await wsOpen(undefined, 5);
+  check('joining without a signed-in wallet is refused', !practice.id && /connect your phantom/i.test(errOf(practice) || ''), practice.msgs);
   await sleep(1500);
   check('real-money player joined', !!real.id, real.msgs);
-  const lastReal = real.snaps[real.snaps.length - 1], lastPractice = practice.snaps[practice.snaps.length - 1];
+  const lastReal = real.snaps[real.snaps.length - 1];
   check('real world contains only the real player', lastReal && lastReal.snakes.length === 1 && lastReal.snakes[0].id === real.id, lastReal && lastReal.snakes.map((s) => s.id));
-  check('practice world is separate (does not see the real player)', lastPractice && lastPractice.snakes.length === 1 && lastPractice.snakes[0].id === practice.id, lastPractice && lastPractice.snakes.map((s) => s.id));
   const mid = (await admin('GET', '/admin/api/status')).json;
   check('open stake counted as in play, surplus unchanged', near(mid.solvency.inPlaySol, 0.05, 0.001) && mid.solvency.ok && near(mid.solvency.surplusSol, S1, 0.0001), mid.solvency);
   check('stake deducted while playing', near((await balanceOf(pidA)).sol, 0));
@@ -290,6 +278,19 @@ const errOf = (state) => (state.msgs.find((m) => m.t === 'error') || {}).message
   check('admin shows the fee setting and no fees collected yet', stE.earnings && stE.earnings.rakePercent === 5 && stE.earnings.feesCollectedSol === 0, stE.earnings);
   real.ws.close(); practice.ws.close();
   check('balance restored after cash-out', near((await balanceOf(pidA)).sol, 0.05));
+
+  const evil = await wsOpen(pidA, 5, '<img src=x onerror=alert(1)>');
+  await sleep(600);
+  const evilSnap = evil.snaps[evil.snaps.length - 1];
+  const evilName = evilSnap && evilSnap.snakes.find((s) => s.id === evil.id).name;
+  check('markup in a player name is stripped by the server', evil.id && evilName && !/[<>"'&]/.test(evilName) && evilName.length <= 16, evilName);
+  await wsCashout(evil); evil.ws.close();
+  const junk = await wsOpen(pidA, 5, '\u0000\u0007‮  ');
+  await sleep(300);
+  const junkSnap = junk.snaps[junk.snaps.length - 1];
+  check('a name made only of control characters becomes the default', junkSnap && junkSnap.snakes.find((s) => s.id === junk.id).name === 'Player');
+  await wsCashout(junk); junk.ws.close();
+
 
   console.log('\n== withdrawals and limits (per request 0.04, per player/day 0.07, all players/day 0.10) ==');
   const key = 'e2e-key-' + crypto.randomBytes(6).toString('hex');
@@ -341,7 +342,7 @@ const errOf = (state) => (state.msgs.find((m) => m.t === 'error') || {}).message
   check('real-money buy-ins refused while paused', /paused/i.test(errOf(pj) || ''), pj.msgs);
   pj.ws.close();
   const prj = await wsOpen(undefined, 5);
-  check('practice play still works while paused', !!prj.id);
+  check('joining without a wallet is still refused while paused', !prj.id);
   prj.ws.close();
   check('balance API reports paused', (await balanceOf(pidA)).paused === true);
   const pco = await wsCashout(stake);
