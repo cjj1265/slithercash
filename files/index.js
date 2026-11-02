@@ -11,6 +11,10 @@
 //      WALLET_PAUSED=1 (start paused), MAX_WITHDRAW_SOL, MAX_PLAYER_DAILY_WITHDRAW_SOL,
 //      MAX_DAILY_WITHDRAW_SOL, MAX_BUYIN_CREDITS, LOW_WALLET_SOL — see solanaWallet.js
 //      TRUST_PROXY=1 (optional, rate-limit by X-Forwarded-For behind Render/Railway)
+//      TRUST_CLOUDFLARE=1 (use Cloudflare's CF-Connecting-IP as the visitor address) and
+//      ORIGIN_SECRET (a long random string Cloudflare adds to every request as the X-Origin-Secret
+//        header; when set, requests without it are refused, so only Cloudflare can reach this server.
+//        /health stays open for the host's health checks)
 //
 // Protocol (JSON text frames over WebSocket):
 //
@@ -33,6 +37,7 @@
 
 const http = require('http');
 const crypto = require('crypto');
+const net = require('net');
 const fs = require('fs');
 const path = require('path');
 const { attachWebSocketServer } = require('./wsProtocol');
@@ -75,6 +80,8 @@ const walletByPlayer = new Map();
 
 const CORS_ORIGINS = (process.env.CORS_ORIGIN || '').split(',').map((s) => s.trim()).filter(Boolean);
 const TRUST_PROXY = process.env.TRUST_PROXY === '1';
+const TRUST_CLOUDFLARE = process.env.TRUST_CLOUDFLARE === '1';
+const ORIGIN_SECRET = process.env.ORIGIN_SECRET || '';
 const WITHDRAW_RATE_MAX = Number(process.env.WITHDRAW_RATE_MAX) || 6; // withdraw requests per player per minute
 
 /** The page is served from this same server, so CORS is off unless CORS_ORIGIN names other origins. */
@@ -104,7 +111,16 @@ setInterval(() => {
   for (const [id, b] of rateBuckets) if (b.resetAt < now) rateBuckets.delete(id);
 }, 60000).unref();
 
+/**
+ * Behind Cloudflare every visitor reaches us from a Cloudflare address, so the real visitor is in the
+ * CF-Connecting-IP header. It is only believed when TRUST_CLOUDFLARE=1 — and it can only be trusted at all
+ * if nobody can reach this server except through Cloudflare, which is what ORIGIN_SECRET enforces.
+ */
 function clientIp(req) {
+  if (TRUST_CLOUDFLARE) {
+    const cf = String(req.headers['cf-connecting-ip'] || '').trim();
+    if (net.isIP(cf)) return cf;
+  }
   if (TRUST_PROXY) {
     const parts = String(req.headers['x-forwarded-for'] || '').split(',');
     const last = parts[parts.length - 1].trim();
@@ -296,7 +312,20 @@ async function handleAdmin(req, res) {
   }
 }
 
+/**
+ * With ORIGIN_SECRET set, only requests that carry it (Cloudflare adds it) are served. Anyone who finds the
+ * direct onrender.com address gets a 403, so they cannot bypass Cloudflare's protection or forge the visitor
+ * address header. /health is exempt because the host's own health checks do not go through Cloudflare.
+ */
+function originAllowed(req) {
+  if (!ORIGIN_SECRET || req.url === '/health') return true;
+  const given = crypto.createHash('sha256').update(String(req.headers['x-origin-secret'] || '')).digest();
+  const wanted = crypto.createHash('sha256').update(ORIGIN_SECRET).digest();
+  return crypto.timingSafeEqual(given, wanted);
+}
+
 const httpServer = http.createServer((req, res) => {
+  if (!originAllowed(req)) { res.writeHead(403, { 'Content-Type': 'text/plain' }); res.end('Forbidden'); return; }
   // Simple healthcheck endpoint — useful for Railway/Render/Fly health probes.
   if (req.url === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -360,6 +389,7 @@ const WS_IDLE_LOBBY_MS = Number(process.env.WS_IDLE_LOBBY_MS) || 30000;     // a
  * A missing Origin means a non-browser client, which has no cross-site risk here.
  */
 function verifyWsOrigin(req) {
+  if (!originAllowed(req)) return false; // game connections must come through Cloudflare too
   const origin = req.headers.origin;
   if (!origin) return true;
   if (WS_ALLOWED_ORIGINS.includes('*') || WS_ALLOWED_ORIGINS.includes(origin)) return true;
@@ -570,6 +600,10 @@ setInterval(() => {
 httpServer.listen(PORT, () => {
   console.log(`SnakePay multiplayer server listening on :${PORT}`);
   console.log(`Healthcheck: http://localhost:${PORT}/health`);
+  if (TRUST_CLOUDFLARE && !ORIGIN_SECRET) {
+    console.warn('[security] TRUST_CLOUDFLARE is on but ORIGIN_SECRET is not set: anyone who reaches this server directly can forge their address and dodge the per-address limits. Set ORIGIN_SECRET.');
+  }
+  if (ORIGIN_SECRET) console.log('[security] ORIGIN_SECRET set: only requests carrying it (and /health) are served');
   wallet.setInPlayProvider(() => realWorld.totalValue());
   wallet.init();
   if (practiceWorld.botCount > 0) {
