@@ -328,9 +328,42 @@ function countBots() {
   return n;
 }
 
+/* ============================== WebSocket limits ============================== */
+
+const WS_ALLOWED_ORIGINS = (process.env.WS_ALLOWED_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean);
+const WS_JOIN_TIMEOUT_MS = Number(process.env.WS_JOIN_TIMEOUT_MS) || 10000; // a new connection must join a game within this long
+const WS_IDLE_LOBBY_MS = Number(process.env.WS_IDLE_LOBBY_MS) || 30000;     // a connection sitting outside a game is dropped after this long
+
+/**
+ * Browsers always send Origin, so only this site's own pages (or origins listed in WS_ALLOWED_ORIGINS)
+ * can open a game connection. Without this, any other website a player visits could open one for them.
+ * A missing Origin means a non-browser client, which has no cross-site risk here.
+ */
+function verifyWsOrigin(req) {
+  const origin = req.headers.origin;
+  if (!origin) return true;
+  if (WS_ALLOWED_ORIGINS.includes('*') || WS_ALLOWED_ORIGINS.includes(origin)) return true;
+  try { return new URL(origin).host === req.headers.host; } catch (e) { return false; }
+}
+
+const wsOptions = { verifyOrigin: verifyWsOrigin, getIp: clientIp };
+if (Number(process.env.WS_MAX_CONNECTIONS) > 0) wsOptions.maxConnections = Number(process.env.WS_MAX_CONNECTIONS);
+if (Number(process.env.WS_MAX_PER_IP) > 0) wsOptions.maxPerIp = Number(process.env.WS_MAX_PER_IP);
+if (Number(process.env.WS_MAX_MESSAGES_PER_SEC) > 0) wsOptions.maxMessagesPerSec = Number(process.env.WS_MAX_MESSAGES_PER_SEC);
+
+// Connections that sit outside a game (before joining, or after a death or cash-out) are cut loose.
+setInterval(() => {
+  const now = Date.now();
+  for (const session of sessions.values()) {
+    if (!session.playerId && now - session.idleSince > WS_IDLE_LOBBY_MS) session.conn.close(1008, 'idle');
+  }
+}, 5000).unref();
+
 attachWebSocketServer(httpServer, (conn, req) => {
   const connId = 'c' + (connCounter++);
-  sessions.set(connId, { conn, playerId: null, world: null });
+  const session = { conn, playerId: null, world: null, joined: false, idleSince: Date.now() };
+  sessions.set(connId, session);
+  const joinTimer = setTimeout(() => { if (!session.joined) conn.close(1008, 'join timeout'); }, WS_JOIN_TIMEOUT_MS);
 
   conn.on('message', (raw) => {
     let msg;
@@ -339,8 +372,8 @@ attachWebSocketServer(httpServer, (conn, req) => {
   });
 
   conn.on('close', () => {
-    const session = sessions.get(connId);
-    if (session && session.playerId) {
+    clearTimeout(joinTimer);
+    if (session.playerId) {
       // Dropping out mid-game forfeits the stake (it stays in play as orbs). If the
       // snake is already gone — cash-out or death queued this tick — leave the wallet
       // mapping for drainEvents() to settle.
@@ -358,7 +391,7 @@ attachWebSocketServer(httpServer, (conn, req) => {
   conn.on('error', () => {
     // 'close' will also fire; nothing extra needed here.
   });
-});
+}, wsOptions);
 
 function handleMessage(connId, msg) {
   const session = sessions.get(connId);
@@ -367,9 +400,9 @@ function handleMessage(connId, msg) {
   switch (msg.t) {
     case 'join': {
       if (session.playerId) return; // already joined
-      const name = typeof msg.name === 'string' ? msg.name.slice(0, MAX_NAME_LEN) : 'Player';
+      const name = cleanName(msg.name);
       const buyin = clampNum(msg.buyin, CFG.MIN_BUYIN, CFG.MAX_BUYIN, CFG.DEFAULT_BUYIN);
-      const skinIndex = Number.isInteger(msg.skinIndex) ? msg.skinIndex : 0;
+      const skinIndex = Number.isInteger(msg.skinIndex) ? Math.max(0, Math.min(13, msg.skinIndex)) : 0; // 14 skins
       const playerId = connId; // reuse the connection id as the snake id — simple and unique
 
       // Real-balance play: the buy-in comes out of the server-side balance, never
@@ -396,6 +429,7 @@ function handleMessage(connId, msg) {
       world.addPlayer({ id: playerId, name, buyin, skinIndex });
       session.world = world;
       session.playerId = playerId;
+      session.joined = true;
       session.conn.send({
         t: 'welcome',
         id: playerId,
@@ -417,12 +451,21 @@ function handleMessage(connId, msg) {
       break;
     }
     case 'ping': {
-      session.conn.send({ t: 'pong', ts: msg.ts });
+      session.conn.send({ t: 'pong', ts: Number(msg.ts) || 0 }); // echo a number only, never arbitrary client data
       break;
     }
     default:
       break;
   }
+}
+
+/**
+ * Player names are shown to everyone else, so they are cleaned here rather than trusted to every
+ * place that displays them: no markup characters, no control characters, trimmed, limited length.
+ */
+function cleanName(raw) {
+  const s = typeof raw === 'string' ? raw.replace(/[<>&"'`\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, '').trim().slice(0, MAX_NAME_LEN) : '';
+  return s || 'Player';
 }
 
 function clampNum(v, min, max, fallback) {
@@ -459,9 +502,11 @@ function drainEvents(world) {
     if (evt.type === 'death') {
       session.conn.send({ t: 'death', ...evt.data });
       session.playerId = null;
+      session.idleSince = Date.now();
     } else if (evt.type === 'cashout_result') {
       session.conn.send({ t: 'cashout_result', ...evt.data });
       session.playerId = null;
+      session.idleSince = Date.now();
     }
   }
   world.events.length = 0;

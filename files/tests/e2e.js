@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const http = require('http');
+const net = require('net');
 const { spawn } = require('child_process');
 
 const FILES = path.join(__dirname, '..'); // the folder holding index.js
@@ -115,12 +116,12 @@ const depositAndWait = async (kp, pid, addr, solAmount, expectTotal) => {
 };
 
 // ---- websocket helpers ----
-function wsOpen(walletId, buyin) {
+function wsOpen(walletId, buyin, name) {
   return new Promise((resolve) => {
     const ws = new WebSocket('ws://localhost:' + PORT);
     const state = { ws, msgs: [], snaps: [], id: null };
     const timer = setTimeout(() => resolve(state), 6000);
-    ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name: 'e2e', buyin, skinIndex: 0, walletId }));
+    ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name: name || 'e2e', buyin, skinIndex: 0, walletId }));
     ws.onmessage = (ev) => {
       const m = JSON.parse(ev.data);
       if (m.t === 'snapshot') { state.snaps.push(m); return; }
@@ -149,7 +150,7 @@ const errOf = (state) => (state.msgs.find((m) => m.t === 'error') || {}).message
   fake.airdrop(A.publicKey.toBase58(), 1 * LAMPORTS_PER_SOL);
   fake.airdrop(B.publicKey.toBase58(), 1 * LAMPORTS_PER_SOL);
 
-  const LIMIT_ENV = { ADMIN_TOKEN: ADMIN, MAX_WITHDRAW_SOL: '0.04', MAX_PLAYER_DAILY_WITHDRAW_SOL: '0.07', MAX_DAILY_WITHDRAW_SOL: '0.12' };
+  const LIMIT_ENV = { ADMIN_TOKEN: ADMIN, MAX_WITHDRAW_SOL: '0.04', MAX_PLAYER_DAILY_WITHDRAW_SOL: '0.07', MAX_DAILY_WITHDRAW_SOL: '0.12', WS_JOIN_TIMEOUT_MS: '1500' };
 
   console.log('\n== startup, auth, admin auth ==');
   await startServer(game, DATA, LIMIT_ENV);
@@ -180,6 +181,75 @@ const errOf = (state) => (state.msgs.find((m) => m.t === 'error') || {}).message
   console.log('  baseline surplus (the house\'s own capital): ' + S0 + ' SOL');
   for (let i = 0; i < 12; i++) await admin('GET', '/admin/api/status', null, 'y'.repeat(30));
   check('repeated bad admin tokens get rate limited', (await admin('GET', '/admin/api/status', null, 'z'.repeat(30))).status === 429);
+
+  console.log('\n== websocket hardening on the real server ==');
+  const handshake = (origin) => new Promise((resolve) => {
+    const req = http.request({ host: '127.0.0.1', port: PORT, headers: Object.assign({
+      Connection: 'Upgrade', Upgrade: 'websocket', 'Sec-WebSocket-Key': crypto.randomBytes(16).toString('base64'), 'Sec-WebSocket-Version': '13' }, origin ? { Origin: origin } : {}) });
+    req.on('upgrade', (res, socket) => { socket.destroy(); resolve(101); });
+    req.on('response', (res) => { res.resume(); resolve(res.statusCode); });
+    req.on('error', () => resolve(0));
+    req.end();
+  });
+  check('a page on another site cannot open a game connection (403)', (await handshake('http://evil.example')) === 403);
+  check('this site\'s own page can', (await handshake('http://127.0.0.1:' + PORT)) === 101);
+  check('a non-browser client (no Origin) can', (await handshake()) === 101);
+
+  const evil = await wsOpen(undefined, 5, '<img src=x onerror=alert(1)>');
+  await sleep(600);
+  const evilSnap = evil.snaps[evil.snaps.length - 1];
+  const evilName = evilSnap && evilSnap.snakes.find((s) => s.id === evil.id).name;
+  check('markup in a player name is stripped by the server', evil.id && evilName && !/[<>"'&]/.test(evilName) && evilName.length <= 16, evilName);
+  evil.ws.close();
+  const junk = await wsOpen(undefined, 5, '\u0000\u0007‮  ');
+  await sleep(300);
+  const junkSnap = junk.snaps[junk.snaps.length - 1];
+  check('a name made only of control characters becomes the default', junkSnap && junkSnap.snakes.find((s) => s.id === junk.id).name === 'Player');
+  junk.ws.close();
+
+  const waitClose = (ws, ms) => new Promise((resolve) => { const t = setTimeout(() => resolve(null), ms); ws.onclose = (e) => { clearTimeout(t); resolve(e.code); }; });
+  const lurker = new WebSocket('ws://127.0.0.1:' + PORT); // connects, never joins
+  await new Promise((r) => { lurker.onopen = r; });
+  const lurkCode = await waitClose(lurker, 4000);
+  check('a connection that never joins is dropped (join timeout 1.5s here)', lurkCode === 1008, lurkCode);
+
+  const flooder = await wsOpen(undefined, 5);
+  const floodClosed = waitClose(flooder.ws, 3000);
+  for (let i = 0; i < 400; i++) flooder.ws.send(JSON.stringify({ t: 'input', angle: 1, boosting: false }));
+  check('flooding messages gets the connection closed (1008)', (await floodClosed) === 1008);
+
+  const big = await wsOpen(undefined, 5);
+  const bigClosed = waitClose(big.ws, 3000);
+  big.ws.send('x'.repeat(10000));
+  check('an oversized message gets the connection closed (1009)', (await bigClosed) === 1009);
+
+  const rawJunk = await wsOpen(undefined, 5);
+  rawJunk.ws.send('not json at all'); rawJunk.ws.send('{"t":"input","angle":"banana","boosting":{"x":1}}'); rawJunk.ws.send('{"t":{"a":1}}'); rawJunk.ws.send('null');
+  await sleep(500);
+  check('malformed and junk messages are ignored without crashing anything', rawJunk.ws.readyState === 1 && (await http_('GET', '/health')).json.ok === true);
+  rawJunk.ws.close();
+
+  // An abrupt hang-up (TCP close with no WebSocket close frame) must remove the player from the game.
+  await sleep(700); // let the previous tests' sockets finish closing so the baseline is steady
+  const playersBefore = (await http_('GET', '/health')).json.players;
+  const maskedText = (str) => { const p = Buffer.from(str); const m = crypto.randomBytes(4); return Buffer.concat([Buffer.from([0x81, 0x80 | p.length]), m, Buffer.from(p.map((b, i) => b ^ m[i & 3]))]); };
+  await new Promise((resolve) => {
+    const sock = net.connect(PORT, '127.0.0.1');
+    let sent = false;
+    sock.on('connect', () => sock.write(['GET / HTTP/1.1', 'Host: 127.0.0.1:' + PORT, 'Upgrade: websocket', 'Connection: Upgrade', 'Sec-WebSocket-Key: ' + crypto.randomBytes(16).toString('base64'), 'Sec-WebSocket-Version: 13', '', ''].join('\r\n')));
+    sock.on('data', async () => {
+      if (sent) return;
+      sent = true;
+      sock.write(maskedText(JSON.stringify({ t: 'join', name: 'raw', buyin: 5, skinIndex: 0 })));
+      for (let i = 0; i < 40 && (await http_('GET', '/health')).json.players <= playersBefore; i++) await sleep(50);
+      sock.destroy(); // vanish
+      resolve();
+    });
+    sock.on('error', () => {});
+  });
+  let gone = false;
+  for (let i = 0; i < 40 && !gone; i++) { gone = (await http_('GET', '/health')).json.players <= playersBefore; if (!gone) await sleep(100); }
+  check('a client that vanishes without saying goodbye is removed from the game', gone);
 
   console.log('\n== deposits and solvency ==');
   await transfer(A, addrA, 0.005 * LAMPORTS_PER_SOL); // dust

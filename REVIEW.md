@@ -1,6 +1,6 @@
 # SlitherCash: guide for a code reviewer
 
-This is for someone reviewing the money-handling code before real funds are put through it. It says what the system is, how money moves, what protects it, what is tested, and where I think the weak spots are. Line numbers are as of commit `18a6fef`; function names are the stable reference.
+This is for someone reviewing the money-handling code before real funds are put through it. It says what the system is, how money moves, what protects it, what is tested, and where I think the weak spots are. Line numbers are approximate and drift as the code changes; function names are the stable reference.
 
 **Status:** runs on Solana **devnet** (play money) only. It has never run on mainnet. The server refuses to start the wallet on mainnet unless several conditions are met (see "Network guard").
 
@@ -13,7 +13,7 @@ A Slither.io-style browser game with a stake. Players deposit SOL, buy in with p
 | `files/solanaWallet.js` | **All the money logic.** Balances, deposits, withdrawals, fee, limits, pause, solvency, alerts. Start here. |
 | `files/index.js` | HTTP API (`/api/*`), admin (`/admin`), WebSocket game sessions. Wires the game to the wallet. |
 | `files/gameServer.js` | Game simulation (`GameWorld`). Movement, collisions, orbs, death, cash-out value. |
-| `files/wsProtocol.js` | A hand-written WebSocket server (no `ws` package). |
+| `files/wsProtocol.js` | A hand-written, hardened WebSocket server (no `ws` package): message size and rate limits, origin check, connection caps, heartbeat, slow-reader cutoff. |
 | `files/slithercash.html` | The client. Displays state and asks the server to act; it is not trusted for amounts. |
 | `files/admin.html` | Admin dashboard (token-protected). |
 | `files/tests/` | Test suites and a simulated Solana RPC. |
@@ -57,6 +57,7 @@ So the total value in a world (`totalValue`, `:98`) never increases. It can only
 - **Pause switch** (`setPaused`): stops buy-ins and withdrawals, never stops crediting deposits or cash-outs. Persisted; `WALLET_PAUSED=1` forces it.
 - **Solvency check** (`computeSolvency` `:398`, `checkSolvency` `:430`, every poll): `holds = game wallet + credited-but-unswept deposits`; `owes = player balances + value in play in the real world + withdrawals in flight`; network fees absorbed by the game wallet are added back. Two failures in a row auto-pause and alert.
 - **Separate worlds:** practice players and bots hold value nobody paid for, so they live in a different `GameWorld` and never share a map with real-money players.
+- **WebSocket hardening** (`wsProtocol.js`, wired in `index.js`): 4 KB maximum message, enforced from the frame header so nothing larger is ever buffered; 60 messages per second per connection; strict RFC 6455 rules (reserved bits, masking, known opcodes, small unfragmented control frames; fragmented data messages are refused); an Origin check so other websites cannot open game connections for a visitor; caps of 500 connections in total and 10 per IP; a 20s heartbeat that drops silent connections; a cutoff for clients that stop reading; a 10s deadline to join a game and 30s idle limit outside one. Player names are cleaned server-side (no markup, control or invisible formatting characters) and shown by the client as text only.
 - **Alerts** (`ALERT_WEBHOOK_URL`, Discord/Slack): pause/resume, insolvency, low game wallet, daily cap hit, unconfirmed withdrawal over 10 minutes, repeated RPC failure, mainnet start.
 - **Network guard** (`verifyNetworkThenStart` `:848`): the wallet stays disabled until the RPC's genesis hash identifies the network. Mainnet additionally needs `ALLOW_MAINNET=1`, a dedicated `DEPOSIT_MASTER_SEED`, and an alert webhook. Unknown networks are refused.
 - **Persistence:** `save()` writes a temp file then renames; a corrupt store makes startup fail rather than start empty. Every deposit, sweep, buy-in, cash-out, withdrawal and pause event is appended to `<data file>.ledger.jsonl` with signatures.
@@ -69,8 +70,11 @@ From `files/` (Node 18+, after `npm install`):
 ```
 npm run test:economy   # value conservation in the game simulation (seconds)
 npm run test:fee       # cash-out fee maths (seconds)
-npm run test:wallet    # end-to-end: 92 checks, a few minutes
+npm run test:ws        # WebSocket attack tests against wsProtocol.js with a raw TCP client (seconds)
+npm run test:wallet    # end-to-end: 102 checks, a few minutes
 ```
+
+`test:ws` sends exactly what a hostile client would: oversized and lying frame headers, floods, unmasked and fragmented frames, reserved bits, bad opcodes, wrong origins, too many connections, silent connections and a client that stops reading.
 
 `test:wallet` runs the real server against a **simulated chain** (`tests/fake-chain-lib.js`: it parses and signature-checks the transactions the wallet builds and applies transfers with fees and rent rules). It covers auth and replay, dust, no double credit, restart persistence, the wiped-store regression, limits, pause (including persistence), admin auth and rate limiting, alerts, world separation, solvency and auto-pause, crash recovery and refunds, the network guard, and a real two-player head-on fight ending in a cash-out with a fee.
 
@@ -83,13 +87,15 @@ npm run test:wallet    # end-to-end: 92 checks, a few minutes
 3. **Wiped store re-credited old deposits.** After a restart without a persistent disk, the first scan of a deposit address read its entire on-chain history. Fixed by ignoring deposits older than the registration time.
 4. **Practice snakes could feed real players.** They shared a map. Fixed with separate worlds.
 5. **Death silently kept ~47% of a stake.** Replaced by an explicit, disclosed fee on profit.
+6. **Stored XSS through player names.** The leaderboard built HTML from other players' names, so a hostile name could run script in every player's page and read the wallet id from the requests it makes. Fixed twice over: names are cleaned on the server, and the client sets them as text only.
+7. **Disconnected players stayed in the game.** Node's http server keeps upgraded sockets half-open, so a client that hung up without a WebSocket close frame never produced a `close` event: the snake stayed on the map and the connection was counted forever. Found by the new WebSocket tests and fixed in `wsProtocol.js`.
 
 ## Known gaps and risks (my honest list)
 
 - **Never run on mainnet**, and the automated tests use a simulated chain.
 - **Hot wallet.** `GAME_WALLET_SECRET` is an environment variable on the host. Whoever gets it can drain the game wallet; the app's withdrawal limits do not apply to someone holding the key. The only mitigation is keeping the balance small.
 - **Single instance only.** State lives in process memory plus one file. Two instances would double-process deposits and withdrawals. Render must run exactly one.
-- **`wsProtocol.js` is unhardened.** No maximum frame size (a client can make it buffer without bound), no idle timeouts, no per-connection message rate limit, no origin check, and no support for fragmented messages.
+- **Volumetric denial of service is not handled.** The WebSocket server now limits each connection and each IP, but a flood from many addresses still reaches one Node process. The usual answer is a CDN or proxy in front (Cloudflare or similar); Render's own edge helps somewhat. Fragmented WebSocket messages are refused by design.
 - **No collusion or multi-account detection.** Friends can feed each other (it is only a transfer, and the fee applies to profit), and nothing stops one person running many wallets.
 - **Dust.** Deposits under 0.01 SOL are not credited but are swept into the game wallet along with the next real deposit, so the house keeps them.
 - **RPC trust.** Deposit amounts come from the RPC's answer. A malicious or buggy RPC could misreport. Finalized commitment narrows but does not remove this.
@@ -104,7 +110,7 @@ npm run test:wallet    # end-to-end: 92 checks, a few minutes
 3. The login flow: challenge parsing, replay, the `playerId` derivation, and the ed25519 verification in `completeLogin`.
 4. The solvency formula and the fee add-back, and whether two consecutive failures is the right trigger.
 5. The game economy: can a player extract more than their stake plus other players' stakes (simultaneous kills, wall deaths, the orb cap, boost edge cases, anything in `_kill` and `_resolveHeadOnCollisions`)?
-6. `wsProtocol.js` hardening.
+6. `wsProtocol.js`: `_parse` (header checks before buffering), `_shutdown` / `terminate` / the `end` handler (every path must end in exactly one `close` event, because stake forfeiture depends on it), and the origin and cap logic in `attachWebSocketServer`.
 7. The admin surface (`index.js:225`, `:239`).
 8. Race conditions between the async withdrawal flow, the poller and the game tick, given everything runs on one event loop.
 
@@ -132,3 +138,9 @@ npm run test:wallet    # end-to-end: 92 checks, a few minutes
 | `CORS_ORIGIN` | none | Allowed origins for `/api` (same-origin needs none). |
 | `WITHDRAW_RATE_MAX` | `6` | Withdraw requests per player per minute. |
 | `NUM_BOTS` | `0` | Bots in the **practice** world only. |
+| `WS_ALLOWED_ORIGINS` | none | Extra origins allowed to open game connections (the site's own host is always allowed). |
+| `WS_MAX_CONNECTIONS` | `500` | Total WebSocket connections. |
+| `WS_MAX_PER_IP` | `10` | WebSocket connections per IP address. |
+| `WS_MAX_MESSAGES_PER_SEC` | `60` | Messages per connection per second. |
+| `WS_JOIN_TIMEOUT_MS` | `10000` | A new connection must join a game within this long. |
+| `WS_IDLE_LOBBY_MS` | `30000` | A connection outside a game is dropped after this long. |

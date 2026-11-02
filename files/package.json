@@ -8,6 +8,7 @@
     "test": "node test-client.js && node test-multi.js",
     "test:economy": "node tests/economy.test.js",
     "test:fee": "node -r ./tests/fake-preload.js tests/rake-test.js",
+    "test:ws": "node tests/ws.test.js",
     "test:wallet": "node tests/e2e.js"
   },
   "engines": {
