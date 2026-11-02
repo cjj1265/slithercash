@@ -1411,17 +1411,21 @@ function updateHUDAndLeaderboard(dt){
   lbList.innerHTML = '';
   const top = alive.slice(0,10);
   top.forEach((s,i)=>{
-    const li = document.createElement('li');
-    if(s===player) li.className='me';
-    li.innerHTML = '<span class="rk">'+(i+1)+'</span><span class="name">'+s.name+'</span><span>'+fmtMoney(s.length)+'</span>';
-    lbList.appendChild(li);
+    lbList.appendChild(leaderboardRow(i+1, s.name, fmtMoney(s.length), s===player));
   });
   if(rank>10 && rank>0){
-    const li = document.createElement('li');
-    li.className = 'me';
-    li.innerHTML = '<span class="rk">'+rank+'</span><span class="name">'+player.name+'</span><span>'+fmtMoney(player.length)+'</span>';
-    lbList.appendChild(li);
+    lbList.appendChild(leaderboardRow(rank, player.name, fmtMoney(player.length), true));
   }
+}
+/** Names come from other players, so they are only ever set as text, never parsed as HTML. */
+function leaderboardRow(rank, name, money, isMe){
+  const li = document.createElement('li');
+  if(isMe) li.className = 'me';
+  const rk = document.createElement('span'); rk.className = 'rk'; rk.textContent = rank;
+  const nm = document.createElement('span'); nm.className = 'name'; nm.textContent = name;
+  const mo = document.createElement('span'); mo.textContent = money;
+  li.appendChild(rk); li.appendChild(nm); li.appendChild(mo);
+  return li;
 }
 
 /* ============================== MAIN LOOP ============================== */
@@ -2182,7 +2186,10 @@ async function solCopyAddress(){
 /* ---------- Withdraw modal ---------- */
 function solSetWithdrawStatus(html, cls){
   withdrawStatus.className = 'sol-status' + (cls ? ' ' + cls : '');
-  withdrawStatus.innerHTML = html;
+  withdrawStatus.innerHTML = html; // callers pass trusted markup only: use solEsc() on anything that came from outside
+}
+function solEsc(s){
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 function solOpenWithdraw(){
   withdrawKey = solNewKey();
@@ -2220,7 +2227,7 @@ async function solSubmitWithdraw(){
       solSetWithdrawStatus('Still processing — it will settle on its own. Your balance updates when it does.');
     }
   }catch(e){
-    if(e.status){ rotateKey = true; solSetWithdrawStatus(e.message, 'err'); } // server answered: this attempt is over (refunded if it had been deducted)
+    if(e.status){ rotateKey = true; solSetWithdrawStatus(solEsc(e.message), 'err'); } // server answered: this attempt is over (refunded if it had been deducted)
     else solSetWithdrawStatus('Could not reach the server. If you try again it will not pay twice.', 'err');
   }finally{
     if(rotateKey) withdrawKey = solNewKey();
