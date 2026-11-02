@@ -56,6 +56,7 @@ const MIN_DEPOSIT_LAMPORTS = 10000000;   // 0.01 SOL — anything smaller is log
 const MIN_WITHDRAW_LAMPORTS = 1000000;   // 0.001 SOL — also keeps a brand-new destination above rent-exemption
 const TX_FEE_LAMPORTS = 5000;            // base fee for a one-signature transfer
 const HOUSE_RESERVE_LAMPORTS = 1000000;  // the game wallet must keep this much after a payout
+const HISTORY_GRACE_SEC = 30;            // clock-skew allowance when comparing block time to registration time
 const CHALLENGE_TTL_MS = 5 * 60 * 1000;
 const MAX_CHALLENGES = 5000;
 
@@ -483,6 +484,18 @@ async function scanPlayerDeposits(playerId) {
     const lamports = lamportsReceived(tx, player.address);
     processed.add(info.signature);
     player.lastSig = info.signature;
+
+    // An address's chain history outlives our records. If the store was ever lost, the
+    // player re-registers with a fresh createdAt, and anything that landed before then
+    // was already credited (and usually withdrawn) under the old records — crediting it
+    // again would pay it out twice.
+    if (tx.blockTime && tx.blockTime < Math.floor(player.createdAt / 1000) - HISTORY_GRACE_SEC) {
+      save();
+      if (lamports > 0) {
+        ledger('deposit_ignored_before_registration', { playerId, address: player.address, signature: info.signature, lamports });
+      }
+      continue;
+    }
 
     if (lamports >= MIN_DEPOSIT_LAMPORTS) {
       player.lamports += lamports;
