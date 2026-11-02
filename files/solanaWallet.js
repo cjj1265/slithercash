@@ -31,7 +31,9 @@
 //                        (strongly recommended; falls back to a key derived from
 //                        GAME_WALLET_SECRET, in which case rotating the game
 //                        wallet changes every deposit address)
-//   SOLANA_RPC_URL       default https://api.devnet.solana.com
+//   SOLANA_RPC_URL       default https://api.devnet.solana.com. The network is read from the RPC itself;
+//                        on mainnet the wallet refuses to start unless ALLOW_MAINNET=1, a dedicated
+//                        DEPOSIT_MASTER_SEED and ALERT_WEBHOOK_URL are all set.
 //   WALLET_DATA_FILE     where balances live. On Render this MUST point at a
 //                        persistent disk mount (e.g. /var/data/wallet-data.json) —
 //                        the default folder is wiped on every deploy.
@@ -96,6 +98,13 @@ let polling = false;
 // Persisted. players[playerId] = { owner, address, lamports, lastSig, needsSweep, createdAt }
 // withdrawals[`${playerId}:${idempotencyKey}`] = { ..., status: pending|sending|completed|refunded }
 let store = { version: 1, players: {}, processedSignatures: [], withdrawals: {}, paused: null, feesLamports: 0 };
+const GENESIS_NETWORKS = {
+  'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG': 'devnet',
+  '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d': 'mainnet-beta',
+  '4uhcVJyU9pJkvQyS88uRDiswHXSCkY3zQawwpjk2NsNY': 'testnet',
+};
+let network = null;                     // 'devnet' | 'mainnet-beta' | 'testnet' | 'unknown', once verified
+let shuttingDown = false;
 let inPlayProvider = () => 0;           // () => credits currently in play in the real-money world (set by index.js)
 let lastSolvency = null;
 let solvencyFailures = 0;
@@ -423,6 +432,7 @@ async function getAdminStatus() {
   } catch (e) { /* no ledger yet */ }
 
   return {
+    network,
     pause: getPauseInfo(),
     rpc: RPC_URL.replace(/\/\/([^/@]*@)?([^/?]+).*/, '//$2/…'), // host only: RPC URLs often embed an API key
     gameWallet: { address: game.publicKey.toBase58(), sol: lamportsToSol(solvency.houseLamports) },
@@ -776,10 +786,6 @@ function init() {
     console.log('[wallet] GAME_WALLET_SECRET not set — Solana wallet disabled, practice mode only');
     return false;
   }
-  if (/mainnet/i.test(RPC_URL) && process.env.ALLOW_MAINNET !== '1') {
-    console.error('[wallet] SOLANA_RPC_URL looks like mainnet. This build is devnet-only; set ALLOW_MAINNET=1 to override. Wallet disabled.');
-    return false;
-  }
   try {
     const secret = JSON.parse(raw);
     if (!Array.isArray(secret) || secret.length !== 64) throw new Error('expected a JSON array of 64 numbers');
@@ -793,15 +799,55 @@ function init() {
 
     loadStore();
     connection = new Connection(RPC_URL, 'confirmed');
-    enabled = true;
   } catch (e) {
     console.error('[wallet] startup failed, wallet disabled:', e.message);
-    enabled = false;
     return false;
   }
 
+  // The wallet stays disabled until the RPC proves which network it is actually on.
+  verifyNetworkThenStart();
+  return true;
+}
+
+/**
+ * Which network is this? Asked of the RPC itself (its genesis hash), never guessed from the URL: paid
+ * providers' URLs don't reliably say "mainnet", and pointing a real wallet at the wrong network
+ * (or play money at the real one) is exactly the kind of mistake worth refusing to start over.
+ */
+async function verifyNetworkThenStart() {
+  while (!shuttingDown) {
+    try {
+      network = GENESIS_NETWORKS[await connection.getGenesisHash()] || 'unknown';
+      break;
+    } catch (e) {
+      console.error('[wallet] could not identify the network (retrying in 10s):', e.message);
+      await new Promise((r) => setTimeout(r, 10000));
+    }
+  }
+  if (shuttingDown) return;
+
+  let refusal = null;
+  if (network === 'unknown') refusal = 'the RPC reports a network this build does not recognise';
+  else if (network === 'mainnet-beta') {
+    const seed = process.env.DEPOSIT_MASTER_SEED;
+    if (process.env.ALLOW_MAINNET !== '1') refusal = 'this is MAINNET (real money) and ALLOW_MAINNET=1 is not set';
+    else if (!seed || seed.length < 16) refusal = 'mainnet requires a dedicated DEPOSIT_MASTER_SEED (16+ characters)';
+    else if (!ALERT_URL) refusal = 'mainnet requires ALERT_WEBHOOK_URL so someone hears about problems';
+  }
+  if (refusal) {
+    console.error('[wallet] REFUSING TO START on ' + network + ': ' + refusal + '. Wallet disabled.');
+    enabled = false;
+    return;
+  }
+  enabled = true;
+  if (network === 'mainnet-beta') {
+    console.warn('[wallet] *** MAINNET: real money. ***');
+    sendAlert('mainnet-start', 'Server started on MAINNET (real money). Limits: ' + lamportsToSol(LIMITS.maxWithdrawLamports) + ' SOL per withdrawal, ' +
+      lamportsToSol(LIMITS.maxGlobalDailyLamports) + ' SOL per day in total', 60 * 1000);
+  }
+
   // Paid RPC URLs usually carry an API key, so only ever log the host.
-  console.log('[wallet] enabled on ' + RPC_URL.replace(/\/\/([^/@]*@)?([^/?]+).*/, '//$2/…'));
+  console.log('[wallet] enabled on ' + network + ' via ' + RPC_URL.replace(/\/\/([^/@]*@)?([^/?]+).*/, '//$2/…'));
   console.log('[wallet] game wallet: ' + game.publicKey.toBase58());
   console.log('[wallet] data file: ' + DATA_FILE);
   console.log('[wallet] limits: withdraw ' + lamportsToSol(LIMITS.maxWithdrawLamports) + ' SOL each, ' +
@@ -813,10 +859,10 @@ function init() {
 
   setTimeout(pollDeposits, 2000);
   pollTimer = setInterval(pollDeposits, POLL_MS);
-  return true;
 }
 
 function shutdown() {
+  shuttingDown = true;
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = null;
 }
@@ -825,6 +871,7 @@ module.exports = {
   init,
   shutdown,
   isEnabled: () => enabled,
+  getNetwork: () => network,
   WalletError,
   CREDITS_PER_SOL,
   MIN_DEPOSIT_SOL: lamportsToSol(MIN_DEPOSIT_LAMPORTS),

@@ -152,8 +152,14 @@ async function handleApi(req, res) {
   try {
     const url = new URL(req.url, 'http://localhost');
     const route = req.method + ' ' + url.pathname;
-    const known = ['GET /api/login-challenge', 'POST /api/login', 'GET /api/player-deposit-address', 'GET /api/player-balance', 'POST /api/withdraw'];
+    const known = ['GET /api/config', 'GET /api/login-challenge', 'POST /api/login', 'GET /api/player-deposit-address', 'GET /api/player-balance', 'POST /api/withdraw'];
     if (!known.includes(route)) { sendJson(res, 404, { error: 'Not found.' }); return; }
+
+    // Public and harmless: lets the page say "Devnet" or not before anyone connects a wallet.
+    if (route === 'GET /api/config') {
+      sendJson(res, 200, { enabled: wallet.isEnabled(), network: wallet.getNetwork(), paused: wallet.isEnabled() ? wallet.isPaused() : false });
+      return;
+    }
     if (!wallet.isEnabled()) throw new wallet.WalletError('wallet_disabled', 'Solana wallet is not configured on this server', 503);
 
     if (route === 'GET /api/login-challenge') {
@@ -166,7 +172,7 @@ async function handleApi(req, res) {
       if (rateLimited('login', clientIp(req), 20, 60000)) throw new wallet.WalletError('rate_limited', 'Too many requests', 429);
       const body = await readJson(req, 4096);
       const r = wallet.completeLogin(body.publicKey, body.message, body.signature);
-      sendJson(res, 200, Object.assign({ playerId: r.playerId, address: r.address, rate: wallet.CREDITS_PER_SOL, limits: wallet.getPublicLimits(), paused: wallet.isPaused() },
+      sendJson(res, 200, Object.assign({ playerId: r.playerId, address: r.address, rate: wallet.CREDITS_PER_SOL, limits: wallet.getPublicLimits(), paused: wallet.isPaused(), network: wallet.getNetwork() },
         balanceBody(wallet.getPlayerBalance(r.playerId))));
       return;
     }
@@ -498,8 +504,8 @@ httpServer.listen(PORT, () => {
   console.log(`Healthcheck: http://localhost:${PORT}/health`);
   wallet.setInPlayProvider(() => realWorld.totalValue());
   wallet.init();
-  if (wallet.isEnabled() && practiceWorld.botCount > 0) {
-    console.log('[wallet] NUM_BOTS applies to practice play only — the real-money world never has bots');
+  if (practiceWorld.botCount > 0) {
+    console.log('[game] NUM_BOTS applies to practice play only — the real-money world never has bots');
   }
 });
 
