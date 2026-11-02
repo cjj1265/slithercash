@@ -58,6 +58,22 @@ const TX_FEE_LAMPORTS = 5000;            // base fee for a one-signature transfe
 const HOUSE_RESERVE_LAMPORTS = 1000000;  // the game wallet must keep this much after a payout
 const HISTORY_GRACE_SEC = 30;            // clock-skew allowance when comparing block time to registration time
 const CHALLENGE_TTL_MS = 5 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const STUCK_WITHDRAWAL_MS = 10 * 60 * 1000;
+const WITHDRAWAL_KEEP_MS = 30 * DAY_MS;  // finished withdrawal records (idempotency keys) are pruned after this
+
+// Safety limits. They bound what a bug, an exploit or a leaked key can take, so keep them small
+// until the system has earned trust. All are env-configurable.
+const envNum = (name, fallback) => { const n = Number(process.env[name]); return Number.isFinite(n) && n > 0 ? n : fallback; };
+const LIMITS = {
+  maxWithdrawLamports: Math.round(envNum('MAX_WITHDRAW_SOL', 0.2) * LAMPORTS_PER_SOL),               // per request
+  maxPlayerDailyLamports: Math.round(envNum('MAX_PLAYER_DAILY_WITHDRAW_SOL', 0.5) * LAMPORTS_PER_SOL), // per player, rolling 24h
+  maxGlobalDailyLamports: Math.round(envNum('MAX_DAILY_WITHDRAW_SOL', 2) * LAMPORTS_PER_SOL),        // everyone together, rolling 24h
+  maxBuyinCredits: envNum('MAX_BUYIN_CREDITS', 20),                                                    // per game, in $
+  lowWalletLamports: Math.round(envNum('LOW_WALLET_SOL', 0.2) * LAMPORTS_PER_SOL),                    // alert when the game wallet drops below
+  insolvencyToleranceLamports: Math.round(envNum('INSOLVENCY_TOLERANCE_SOL', 0.02) * LAMPORTS_PER_SOL),
+};
+const ALERT_URL = process.env.ALERT_WEBHOOK_URL || '';
 const MAX_CHALLENGES = 5000;
 
 class WalletError extends Error {
@@ -79,7 +95,12 @@ let polling = false;
 
 // Persisted. players[playerId] = { owner, address, lamports, lastSig, needsSweep, createdAt }
 // withdrawals[`${playerId}:${idempotencyKey}`] = { ..., status: pending|sending|completed|refunded }
-let store = { version: 1, players: {}, processedSignatures: [], withdrawals: {} };
+let store = { version: 1, players: {}, processedSignatures: [], withdrawals: {}, paused: null, feesLamports: 0 };
+let inPlayProvider = () => 0;           // () => credits currently in play in the real-money world (set by index.js)
+let lastSolvency = null;
+let solvencyFailures = 0;
+let rpcFailures = 0;
+const alertLast = new Map();
 const processed = new Set();            // every signature already credited or deliberately skipped
 const inflight = new Set();             // withdrawal keys currently being driven by withdraw()
 const challenges = new Map();           // nonce -> { publicKey, message, expires }
@@ -97,6 +118,8 @@ function loadStore() {
     players: parsed.players || {},
     processedSignatures: parsed.processedSignatures || [],
     withdrawals: parsed.withdrawals || {},
+    paused: parsed.paused || null,
+    feesLamports: parsed.feesLamports || 0,
   };
   for (const sig of store.processedSignatures) processed.add(sig);
 }
@@ -113,6 +136,44 @@ function ledger(type, fields) {
   console.log('[ledger] ' + line);
   try { fs.appendFileSync(LEDGER_FILE, line + '\n'); }
   catch (e) { console.error('[wallet] could not append to ledger file:', e.message); }
+}
+
+/* ============================== alerts / pause switch ============================== */
+
+/** Post to ALERT_WEBHOOK_URL (Discord and Slack style). Repeats of the same key are muted for `minGapMs`. */
+function sendAlert(key, message, minGapMs) {
+  console.warn('[ALERT] ' + message);
+  if (!ALERT_URL) return;
+  const now = Date.now();
+  if ((alertLast.get(key) || 0) + (minGapMs === undefined ? 10 * 60 * 1000 : minGapMs) > now) return;
+  alertLast.set(key, now);
+  const text = 'SlitherCash: ' + message;
+  fetch(ALERT_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content: text, text }),
+    signal: AbortSignal.timeout(8000),
+  }).catch((e) => console.error('[wallet] alert webhook failed:', e.message));
+}
+
+const envPaused = () => process.env.WALLET_PAUSED === '1';
+function isPaused() { return envPaused() || !!store.paused; }
+function getPauseInfo() {
+  if (envPaused()) return { paused: true, reason: 'Forced by the WALLET_PAUSED environment variable', forcedByEnv: true };
+  return store.paused ? { paused: true, forcedByEnv: false, at: store.paused.at, reason: store.paused.reason, by: store.paused.by } : { paused: false };
+}
+
+/**
+ * Pausing stops new buy-ins and withdrawals. It never stops crediting: deposits and cash-outs
+ * still land in balances, because that money belongs to players whatever state the site is in.
+ */
+function setPaused(paused, reason, by) {
+  requireEnabled();
+  store.paused = paused ? { at: Date.now(), reason: String(reason || 'manual').slice(0, 200), by: by || 'admin' } : null;
+  save();
+  ledger(paused ? 'paused' : 'resumed', { reason: store.paused ? store.paused.reason : null, by: by || 'admin' });
+  sendAlert('pause-toggle:' + paused, paused ? 'PAUSED (' + (reason || 'manual') + ')' : 'Resumed', 0);
+  return getPauseInfo();
 }
 
 /* ============================== conversions / helpers ============================== */
@@ -274,6 +335,125 @@ async function getGameBalance() {
   return { address: game.publicKey.toBase58(), lamports, sol: lamportsToSol(lamports) };
 }
 
+/** What clients may be told about the limits, so the UI can steer players before the server refuses them. */
+function getPublicLimits() {
+  return { maxWithdrawSol: lamportsToSol(LIMITS.maxWithdrawLamports), maxBuyin: LIMITS.maxBuyinCredits };
+}
+
+/** Called before a wallet-backed buy-in. Throws if the site is paused or the stake is above the limit. */
+function assertCanBuyIn(credits) {
+  requireEnabled();
+  if (isPaused()) throw new WalletError('paused', 'Play with real balance is temporarily paused. Your balance is safe.', 503);
+  if (credits > LIMITS.maxBuyinCredits) throw new WalletError('over_limit', 'The maximum buy-in is $' + LIMITS.maxBuyinCredits, 403);
+}
+
+function setInPlayProvider(fn) { inPlayProvider = fn; }
+
+/**
+ * Can the game wallet cover everything it owes?
+ *   owed   = player balances + value in play in the real-money world + withdrawals already deducted but not yet sent
+ *   holds  = game wallet + deposits that are credited but not yet swept
+ * Value that leaves the world (dead snakes' orbs trimmed by the orb cap) only ever shrinks what is owed,
+ * so a healthy system sits at or above zero surplus.
+ */
+async function computeSolvency() {
+  const houseLamports = await connection.getBalance(game.publicKey, 'confirmed');
+  const unswept = Object.keys(store.players).filter((id) => store.players[id].needsSweep);
+  let unsweptLamports = 0;
+  for (let i = 0; i < unswept.length; i += 100) {
+    const infos = await connection.getMultipleAccountsInfo(
+      unswept.slice(i, i + 100).map((id) => new PublicKey(store.players[id].address)), 'confirmed');
+    for (const info of infos) if (info) unsweptLamports += info.lamports;
+  }
+  // Everything below is read synchronously, together, so it describes one moment.
+  let balances = 0;
+  for (const p of Object.values(store.players)) balances += p.lamports;
+  let inflightLamports = 0;
+  for (const rec of Object.values(store.withdrawals)) if (rec.status === 'pending' || rec.status === 'sending') inflightLamports += rec.lamports;
+  const inPlayLamports = Math.ceil(inPlayProvider() / CREDITS_PER_SOL * LAMPORTS_PER_SOL);
+
+  const assets = houseLamports + unsweptLamports;
+  const owed = balances + inPlayLamports + inflightLamports;
+  // Network fees the game wallet has absorbed (sweeps and withdrawals) are an operating cost, not a
+  // shortfall, so they are added back; otherwise thousands of small transactions would look like insolvency.
+  const surplus = assets - owed + store.feesLamports;
+  return {
+    assetsLamports: assets, houseLamports, unsweptLamports,
+    owedLamports: owed, balancesLamports: balances, inPlayLamports, inflightLamports,
+    feesLamports: store.feesLamports,
+    surplusLamports: surplus,
+    ok: surplus >= -LIMITS.insolvencyToleranceLamports,
+    checkedAt: Date.now(),
+  };
+}
+
+/** Runs every poll. Two failures in a row pause the site, which filters out a single in-flight-withdrawal blip. */
+async function checkSolvency() {
+  const s = await computeSolvency();
+  lastSolvency = s;
+  if (s.houseLamports < LIMITS.lowWalletLamports) {
+    sendAlert('low-wallet', 'Game wallet is low: ' + lamportsToSol(s.houseLamports) + ' SOL (alert threshold ' + lamportsToSol(LIMITS.lowWalletLamports) + ')', 60 * 60 * 1000);
+  }
+  if (s.ok) { solvencyFailures = 0; return s; }
+  solvencyFailures++;
+  if (solvencyFailures >= 2 && !isPaused()) {
+    setPaused(true, 'Auto-pause: the game wallet is short by ' + lamportsToSol(-s.surplusLamports) + ' SOL against what it owes', 'auto');
+    sendAlert('insolvent', 'INSOLVENT — auto-paused. Holds ' + lamportsToSol(s.assetsLamports) + ' SOL, owes ' + lamportsToSol(s.owedLamports) + ' SOL', 0);
+  }
+  return s;
+}
+
+/** Everything the admin page shows. Player ids are bearer secrets, so they are deliberately left out. */
+async function getAdminStatus() {
+  requireEnabled();
+  const solvency = await computeSolvency();
+  const out = withdrawnSince(Date.now() - DAY_MS);
+  const players = Object.values(store.players)
+    .map((p) => ({ owner: p.owner, address: p.address, sol: lamportsToSol(p.lamports), createdAt: p.createdAt, needsSweep: p.needsSweep }))
+    .sort((a, b) => b.sol - a.sol)
+    .slice(0, 200);
+  const unsettled = Object.values(store.withdrawals)
+    .filter((r) => r.status === 'pending' || r.status === 'sending')
+    .map((r) => ({ to: r.to, sol: lamportsToSol(r.lamports), status: r.status, signature: r.signature, ageSec: Math.round((Date.now() - r.createdAt) / 1000) }));
+
+  let recent = [];
+  try {
+    const lines = fs.readFileSync(LEDGER_FILE, 'utf8').split('\n').filter(Boolean);
+    recent = lines.slice(-60).reverse().map((l) => { try { return JSON.parse(l); } catch (e) { return { raw: l }; } });
+  } catch (e) { /* no ledger yet */ }
+
+  return {
+    pause: getPauseInfo(),
+    rpc: RPC_URL.replace(/\/\/([^/@]*@)?([^/?]+).*/, '//$2/…'), // host only: RPC URLs often embed an API key
+    gameWallet: { address: game.publicKey.toBase58(), sol: lamportsToSol(solvency.houseLamports) },
+    solvency: {
+      ok: solvency.ok,
+      holdsSol: lamportsToSol(solvency.assetsLamports),
+      owesSol: lamportsToSol(solvency.owedLamports),
+      surplusSol: lamportsToSol(solvency.surplusLamports),
+      balancesSol: lamportsToSol(solvency.balancesLamports),
+      inPlaySol: lamportsToSol(solvency.inPlayLamports),
+      inflightSol: lamportsToSol(solvency.inflightLamports),
+      unsweptSol: lamportsToSol(solvency.unsweptLamports),
+      feesPaidSol: lamportsToSol(solvency.feesLamports),
+    },
+    limits: {
+      maxWithdrawSol: lamportsToSol(LIMITS.maxWithdrawLamports),
+      maxPlayerDailySol: lamportsToSol(LIMITS.maxPlayerDailyLamports),
+      maxGlobalDailySol: lamportsToSol(LIMITS.maxGlobalDailyLamports),
+      maxBuyinCredits: LIMITS.maxBuyinCredits,
+      lowWalletSol: lamportsToSol(LIMITS.lowWalletLamports),
+      toleranceSol: lamportsToSol(LIMITS.insolvencyToleranceLamports),
+    },
+    withdrawnLast24hSol: lamportsToSol(out.total),
+    playerCount: Object.keys(store.players).length,
+    alertsConfigured: !!ALERT_URL,
+    unsettledWithdrawals: unsettled,
+    players,
+    recent,
+  };
+}
+
 /* ============================== withdrawals ============================== */
 
 function withdrawalResult(rec, player) {
@@ -291,6 +471,7 @@ function completeWithdrawal(rec) {
   if (rec.status !== 'sending') return;
   rec.status = 'completed';
   rec.updatedAt = Date.now();
+  store.feesLamports += TX_FEE_LAMPORTS; // the game wallet pays this on top of the amount
   save();
   ledger('withdraw_ok', { playerId: rec.playerId, to: rec.to, lamports: rec.lamports, signature: rec.signature });
 }
@@ -403,6 +584,19 @@ async function withdraw(playerAddress, solAmount, opts) {
   }
   if (player.lamports < lamports) throw new WalletError('insufficient_balance', 'Not enough balance', 402);
 
+  if (isPaused()) throw new WalletError('paused', 'Withdrawals are temporarily paused. Your balance is safe.', 503);
+  if (lamports > LIMITS.maxWithdrawLamports) {
+    throw new WalletError('over_limit', 'The maximum per withdrawal is ' + lamportsToSol(LIMITS.maxWithdrawLamports) + ' SOL', 403);
+  }
+  const out = withdrawnSince(Date.now() - DAY_MS);
+  if ((out.byPlayer[playerId] || 0) + lamports > LIMITS.maxPlayerDailyLamports) {
+    throw new WalletError('over_limit', 'Daily withdrawal limit reached (' + lamportsToSol(LIMITS.maxPlayerDailyLamports) + ' SOL per 24 hours). Try again later.', 403);
+  }
+  if (out.total + lamports > LIMITS.maxGlobalDailyLamports) {
+    sendAlert('global-daily-cap', 'Global daily withdrawal cap (' + lamportsToSol(LIMITS.maxGlobalDailyLamports) + ' SOL) reached — withdrawals are being refused until it rolls over');
+    throw new WalletError('over_limit', 'Withdrawals are at their daily limit. Please try again later.', 503);
+  }
+
   player.lamports -= lamports;
   const rec = store.withdrawals[wkey] = {
     playerId, key: idempotencyKey, to, lamports,
@@ -417,13 +611,36 @@ async function withdraw(playerAddress, solAmount, opts) {
   return withdrawalResult(rec, player);
 }
 
+/** Lamports sent (or being sent) since `since`: refunded withdrawals don't count. */
+function withdrawnSince(since) {
+  const byPlayer = {};
+  let total = 0;
+  for (const rec of Object.values(store.withdrawals)) {
+    if (rec.createdAt < since || rec.status === 'refunded') continue;
+    byPlayer[rec.playerId] = (byPlayer[rec.playerId] || 0) + rec.lamports;
+    total += rec.lamports;
+  }
+  return { byPlayer, total };
+}
+
 /** Settle withdrawals left half-done by a crash or a slow confirmation. */
 async function reconcileWithdrawals() {
   for (const [wkey, rec] of Object.entries(store.withdrawals)) {
     if (inflight.has(wkey)) continue;
     if (rec.status === 'pending') refundWithdrawal(rec, 'Interrupted before it was sent'); // signature was never persisted, so nothing went out
-    else if (rec.status === 'sending') await settleWithdrawal(rec);
+    else if (rec.status === 'sending') {
+      await settleWithdrawal(rec);
+      if (rec.status === 'sending' && Date.now() - rec.createdAt > STUCK_WITHDRAWAL_MS) {
+        sendAlert('stuck:' + rec.signature, 'Withdrawal ' + rec.signature + ' (' + lamportsToSol(rec.lamports) + ' SOL) has been unconfirmed for over 10 minutes', 60 * 60 * 1000);
+      }
+    }
   }
+  // Finished records only exist to answer repeated idempotency keys, so they can age out.
+  let pruned = 0;
+  for (const [wkey, rec] of Object.entries(store.withdrawals)) {
+    if ((rec.status === 'completed' || rec.status === 'refunded') && Date.now() - rec.createdAt > WITHDRAWAL_KEEP_MS) { delete store.withdrawals[wkey]; pruned++; }
+  }
+  if (pruned) save();
 }
 
 /* ============================== deposits ============================== */
@@ -445,6 +662,7 @@ async function sweepToGameWallet(playerId) {
   if (res.value.err) throw new Error('sweep failed on-chain: ' + JSON.stringify(res.value.err));
 
   player.needsSweep = false;
+  store.feesLamports += TX_FEE_LAMPORTS; // paid out of the deposit, so the game wallet receives 5000 less than was credited
   save();
   ledger('sweep', { playerId, from: kp.publicKey.toBase58(), lamports, signature });
 }
@@ -538,8 +756,13 @@ async function pollDeposits() {
         console.error('[wallet] deposit scan failed for ' + store.players[id].address + ':', e.message);
       }
     }
+
+    await checkSolvency();
+    rpcFailures = 0;
   } catch (e) {
     console.error('[wallet] deposit poll failed:', e.message);
+    rpcFailures++;
+    if (rpcFailures >= 3) sendAlert('rpc-down', 'The deposit poller has failed ' + rpcFailures + ' times in a row (' + e.message.slice(0, 120) + ') — deposits are not being credited', 30 * 60 * 1000);
   } finally {
     polling = false;
   }
@@ -577,9 +800,14 @@ function init() {
     return false;
   }
 
-  console.log('[wallet] enabled on ' + RPC_URL);
+  // Paid RPC URLs usually carry an API key, so only ever log the host.
+  console.log('[wallet] enabled on ' + RPC_URL.replace(/\/\/([^/@]*@)?([^/?]+).*/, '//$2/…'));
   console.log('[wallet] game wallet: ' + game.publicKey.toBase58());
   console.log('[wallet] data file: ' + DATA_FILE);
+  console.log('[wallet] limits: withdraw ' + lamportsToSol(LIMITS.maxWithdrawLamports) + ' SOL each, ' +
+    lamportsToSol(LIMITS.maxPlayerDailyLamports) + '/player/day, ' + lamportsToSol(LIMITS.maxGlobalDailyLamports) + '/day total; buy-in max $' + LIMITS.maxBuyinCredits);
+  if (isPaused()) console.warn('[wallet] PAUSED: ' + getPauseInfo().reason);
+  if (!ALERT_URL) console.warn('[wallet] ALERT_WEBHOOK_URL not set — nobody will be told if something goes wrong');
   getGameBalance().then((b) => console.log('[wallet] game wallet balance: ' + b.sol + ' SOL'))
     .catch((e) => console.error('[wallet] could not read game wallet balance:', e.message));
 
@@ -610,6 +838,14 @@ module.exports = {
   deductPlayer,
   withdraw,
   getGameBalance,
+  getPublicLimits,
+  assertCanBuyIn,
+  setInPlayProvider,
+  getAdminStatus,
+  isPaused,
+  getPauseInfo,
+  setPaused,
+  sendAlert,
   logLedger: ledger,
   pollDeposits, // exposed for tests
 };

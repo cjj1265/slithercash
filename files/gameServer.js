@@ -83,13 +83,23 @@ function spawnOrb(x, y, value) {
 let idCounter = 1;
 
 class GameWorld {
-  constructor() {
+  /** opts.bots overrides CFG.NUM_BOTS — the real-money world must never contain bots, whose stakes nobody paid. */
+  constructor(opts) {
     this.snakes = new Map(); // id -> snake
     this.orbs = [];
     this.grid = new Map();
     this.elapsed = 0;
     this.events = []; // { type, targetId, data } — drained by the server layer each tick
-    for (let i = 0; i < CFG.NUM_BOTS; i++) this._spawnBot();
+    this.botCount = opts && opts.bots !== undefined ? opts.bots : CFG.NUM_BOTS;
+    for (let i = 0; i < this.botCount; i++) this._spawnBot();
+  }
+
+  /** Total value in play, in credits: every live snake's length plus every orb. An upper bound on what can still be paid out. */
+  totalValue() {
+    let length = 0;
+    for (const s of this.snakes.values()) if (s.alive) length += s.length;
+    for (const o of this.orbs) length += o.value * CFG.GROW_PER_ORB;
+    return toDollars(length);
   }
 
   _makeSnake({ id, name, isPlayer, skinIndex, startLen }) {

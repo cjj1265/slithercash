@@ -6,6 +6,9 @@
 //        — see solanaWallet.js. Without GAME_WALLET_SECRET the server runs in
 //        practice mode only and the /api wallet routes answer 503.
 //      CORS_ORIGIN (optional, comma-separated allowlist for the /api routes)
+//      ADMIN_TOKEN (20+ chars; enables /admin), ALERT_WEBHOOK_URL (Discord/Slack alerts),
+//      WALLET_PAUSED=1 (start paused), MAX_WITHDRAW_SOL, MAX_PLAYER_DAILY_WITHDRAW_SOL,
+//      MAX_DAILY_WITHDRAW_SOL, MAX_BUYIN_CREDITS, LOW_WALLET_SOL — see solanaWallet.js
 //      TRUST_PROXY=1 (optional, rate-limit by X-Forwarded-For behind Render/Railway)
 //
 // Protocol (JSON text frames over WebSocket):
@@ -28,6 +31,7 @@
 //     { t:"error",          message }
 
 const http = require('http');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { attachWebSocketServer } = require('./wsProtocol');
@@ -47,9 +51,15 @@ const MAX_NAME_LEN = 16;
 //     package.json
 const CLIENT_HTML_PATH = path.join(__dirname, 'slithercash.html');
 
-const world = new GameWorld();
+// Two separate worlds, and players in one never meet players in the other. Practice play is free and
+// its snakes (and any bots) hold value nobody paid for; if they shared a map with real-money players,
+// a free snake could die next to a paying one and hand it orbs to cash out. Every unit of value in
+// realWorld was put there by a buy-in taken from a real balance, which is what the solvency check relies on.
+const realWorld = new GameWorld({ bots: 0 });
+const practiceWorld = new GameWorld();
+const worlds = [realWorld, practiceWorld];
 
-/** connId -> { conn: WSConnection, playerId: string|null } */
+/** connId -> { conn: WSConnection, playerId: string|null, world: GameWorld|null } */
 const sessions = new Map();
 let connCounter = 1;
 
@@ -156,7 +166,7 @@ async function handleApi(req, res) {
       if (rateLimited('login', clientIp(req), 20, 60000)) throw new wallet.WalletError('rate_limited', 'Too many requests', 429);
       const body = await readJson(req, 4096);
       const r = wallet.completeLogin(body.publicKey, body.message, body.signature);
-      sendJson(res, 200, Object.assign({ playerId: r.playerId, address: r.address, rate: wallet.CREDITS_PER_SOL },
+      sendJson(res, 200, Object.assign({ playerId: r.playerId, address: r.address, rate: wallet.CREDITS_PER_SOL, limits: wallet.getPublicLimits(), paused: wallet.isPaused() },
         balanceBody(wallet.getPlayerBalance(r.playerId))));
       return;
     }
@@ -174,13 +184,14 @@ async function handleApi(req, res) {
         solBalance: bal.sol,
         rate: wallet.CREDITS_PER_SOL,
         minDepositSol: wallet.MIN_DEPOSIT_SOL,
+        limits: wallet.getPublicLimits(),
       });
       return;
     }
 
     if (route === 'GET /api/player-balance') {
       if (rateLimited('read', playerId, 60, 60000)) throw new wallet.WalletError('rate_limited', 'Too many requests', 429);
-      sendJson(res, 200, balanceBody(wallet.getPlayerBalance(playerId)));
+      sendJson(res, 200, Object.assign(balanceBody(wallet.getPlayerBalance(playerId)), { paused: wallet.isPaused() }));
       return;
     }
 
@@ -198,6 +209,67 @@ async function handleApi(req, res) {
   }
 }
 
+/* ============================== admin ============================== */
+
+// The admin page and its API only exist when ADMIN_TOKEN is set (20+ characters). The token is
+// sent as a Bearer header by admin.html; the page itself carries no data, so it can be served openly.
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';
+const ADMIN_HTML_PATH = path.join(__dirname, 'admin.html');
+
+function adminAuthorized(req) {
+  const m = /^Bearer (.+)$/.exec(String(req.headers.authorization || ''));
+  if (!m) return false;
+  const given = crypto.createHash('sha256').update(m[1]).digest();
+  const wanted = crypto.createHash('sha256').update(ADMIN_TOKEN).digest();
+  return crypto.timingSafeEqual(given, wanted);
+}
+
+/**
+ *   GET  /admin                    -> the admin page
+ *   GET  /admin/api/status         -> balances, solvency, limits, unsettled withdrawals, recent ledger
+ *   POST /admin/api/pause { paused, reason? } -> stop / resume buy-ins and withdrawals
+ *   POST /admin/api/test-alert     -> sends a test message to ALERT_WEBHOOK_URL
+ */
+async function handleAdmin(req, res) {
+  const url = new URL(req.url, 'http://localhost');
+  if (ADMIN_TOKEN.length < 20) { res.writeHead(404); res.end('Not found.'); return; }
+
+  if (url.pathname === '/admin' || url.pathname === '/admin/') {
+    fs.readFile(ADMIN_HTML_PATH, (err, data) => {
+      if (err) { res.writeHead(500, { 'Content-Type': 'text/plain' }); res.end('admin.html is missing next to index.js'); return; }
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Frame-Options': 'DENY' });
+      res.end(data);
+    });
+    return;
+  }
+  if (!url.pathname.startsWith('/admin/api/')) { res.writeHead(404); res.end('Not found.'); return; }
+
+  try {
+    if (!adminAuthorized(req)) {
+      if (rateLimited('admin-fail', clientIp(req), 10, 60000)) throw new wallet.WalletError('rate_limited', 'Too many attempts', 429);
+      throw new wallet.WalletError('unauthorized', 'Wrong or missing admin token', 401);
+    }
+    const route = req.method + ' ' + url.pathname;
+    if (route === 'GET /admin/api/status') {
+      const status = await wallet.getAdminStatus();
+      status.world = { realPlayers: realWorld.snakes.size, inPlayCredits: realWorld.totalValue(), practicePlayers: practiceWorld.snakes.size };
+      sendJson(res, 200, status);
+    } else if (route === 'POST /admin/api/pause') {
+      const body = await readJson(req, 2048);
+      sendJson(res, 200, wallet.setPaused(!!body.paused, body.reason, 'admin'));
+    } else if (route === 'POST /admin/api/test-alert') {
+      wallet.sendAlert('test-alert', 'Test alert from the admin page', 0);
+      sendJson(res, 200, { ok: true, configured: !!process.env.ALERT_WEBHOOK_URL });
+    } else {
+      sendJson(res, 404, { error: 'Not found.' });
+    }
+  } catch (e) {
+    if (e instanceof wallet.WalletError) { sendJson(res, e.status, { error: e.message, code: e.code }); return; }
+    console.error('[admin] unexpected error:', e);
+    sendJson(res, 500, { error: 'Internal error' });
+  }
+}
+
 const httpServer = http.createServer((req, res) => {
   // Simple healthcheck endpoint — useful for Railway/Render/Fly health probes.
   if (req.url === '/health') {
@@ -207,6 +279,10 @@ const httpServer = http.createServer((req, res) => {
   }
   if (req.url.startsWith('/api/')) {
     handleApi(req, res);
+    return;
+  }
+  if (req.url === '/admin' || req.url.startsWith('/admin/') || req.url.startsWith('/admin?')) {
+    handleAdmin(req, res);
     return;
   }
   if (req.url === '/' || req.url === '/index.html' || req.url === '/slithercash.html') {
@@ -237,18 +313,18 @@ const httpServer = http.createServer((req, res) => {
 
 function countPlayers() {
   let n = 0;
-  for (const s of world.snakes.values()) if (s.isPlayer) n++;
+  for (const w of worlds) for (const s of w.snakes.values()) if (s.isPlayer) n++;
   return n;
 }
 function countBots() {
   let n = 0;
-  for (const s of world.snakes.values()) if (!s.isPlayer) n++;
+  for (const w of worlds) for (const s of w.snakes.values()) if (!s.isPlayer) n++;
   return n;
 }
 
 attachWebSocketServer(httpServer, (conn, req) => {
   const connId = 'c' + (connCounter++);
-  sessions.set(connId, { conn, playerId: null });
+  sessions.set(connId, { conn, playerId: null, world: null });
 
   conn.on('message', (raw) => {
     let msg;
@@ -262,8 +338,8 @@ attachWebSocketServer(httpServer, (conn, req) => {
       // Dropping out mid-game forfeits the stake (it stays in play as orbs). If the
       // snake is already gone — cash-out or death queued this tick — leave the wallet
       // mapping for drainEvents() to settle.
-      if (world.snakes.has(session.playerId)) {
-        world.removePlayer(session.playerId);
+      if (session.world.snakes.has(session.playerId)) {
+        session.world.removePlayer(session.playerId);
         if (walletByPlayer.has(session.playerId)) {
           wallet.logLedger('forfeit_disconnect', { walletId: walletByPlayer.get(session.playerId), snake: session.playerId });
           walletByPlayer.delete(session.playerId);
@@ -293,22 +369,26 @@ function handleMessage(connId, msg) {
       // Real-balance play: the buy-in comes out of the server-side balance, never
       // from anything the client claims. No walletId means free practice play.
       let walletId = null;
+      let world = practiceWorld;
       if (typeof msg.walletId === 'string') {
         walletId = msg.walletId;
         try {
+          wallet.assertCanBuyIn(buyin);
           wallet.deductPlayer(walletId, buyin / wallet.CREDITS_PER_SOL);
         } catch (e) {
           const message = e.code === 'insufficient_balance'
             ? 'Not enough balance for that buy-in. Deposit more SOL first.'
-            : 'Wallet error: ' + e.message;
+            : (e.code === 'paused' || e.code === 'over_limit') ? e.message : 'Wallet error: ' + e.message;
           session.conn.send({ t: 'error', message });
           return;
         }
         walletByPlayer.set(playerId, walletId);
         wallet.logLedger('buyin', { walletId, snake: playerId, credits: buyin });
+        world = realWorld;
       }
 
       world.addPlayer({ id: playerId, name, buyin, skinIndex });
+      session.world = world;
       session.playerId = playerId;
       session.conn.send({
         t: 'welcome',
@@ -319,12 +399,12 @@ function handleMessage(connId, msg) {
     }
     case 'input': {
       if (!session.playerId) return;
-      world.setInput(session.playerId, Number(msg.angle), !!msg.boosting);
+      session.world.setInput(session.playerId, Number(msg.angle), !!msg.boosting);
       break;
     }
     case 'cashout': {
       if (!session.playerId) return;
-      world.requestCashout(session.playerId);
+      session.world.requestCashout(session.playerId);
       // NOTE: don't clear session.playerId here — drainEvents() still needs
       // to look this session up by playerId to deliver the cashout_result
       // message on the next tick. It clears playerId itself once sent.
@@ -346,7 +426,7 @@ function clampNum(v, min, max, fallback) {
 }
 
 /** Route per-player events (death/cashout results) generated during tick(). */
-function drainEvents() {
+function drainEvents(world) {
   if (world.events.length === 0) return;
   for (const evt of world.events) {
     // Settle the stake first, even if the socket is already gone.
@@ -385,11 +465,11 @@ function findSessionByPlayerId(playerId) {
   return null;
 }
 
-function broadcastSnapshot() {
+function broadcastSnapshot(world) {
   const snap = world.snapshot();
   const base = JSON.stringify({ t: 'snapshot', snakes: snap.snakes, orbs: snap.orbs, elapsed: snap.elapsed });
   for (const session of sessions.values()) {
-    if (!session.playerId) continue; // don't spam data to un-joined sockets
+    if (!session.playerId || session.world !== world) continue; // un-joined sockets, and the other world's players, get nothing
     // youId differs per client, so we can't reuse the exact same string for everyone.
     session.conn.send(insertYouId(base, session.playerId));
   }
@@ -406,16 +486,23 @@ setInterval(() => {
   const now = Date.now();
   const dt = Math.min(0.1, (now - lastTick) / 1000);
   lastTick = now;
-  world.tick(dt);
-  drainEvents();
-  broadcastSnapshot();
+  for (const world of worlds) {
+    world.tick(dt);
+    drainEvents(world);
+    broadcastSnapshot(world);
+  }
 }, TICK_MS);
 
 httpServer.listen(PORT, () => {
   console.log(`SlitherCash multiplayer server listening on :${PORT}`);
   console.log(`Healthcheck: http://localhost:${PORT}/health`);
+  wallet.setInPlayProvider(() => realWorld.totalValue());
   wallet.init();
+  if (wallet.isEnabled() && practiceWorld.botCount > 0) {
+    console.log('[wallet] NUM_BOTS applies to practice play only — the real-money world never has bots');
+  }
 });
 
-process.on('SIGINT', () => { world.stop(); wallet.shutdown(); process.exit(0); });
-process.on('SIGTERM', () => { world.stop(); wallet.shutdown(); process.exit(0); });
+function shutdown() { for (const w of worlds) w.stop(); wallet.shutdown(); process.exit(0); }
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
