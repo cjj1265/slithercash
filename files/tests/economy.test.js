@@ -27,6 +27,23 @@ for (const buyin of [CFG.MIN_BUYIN, 2.5, 5, 123.45]) {
   console.log('cash-out of buy-in $' + buyin + ' -> $' + out.toFixed(3) + '  ',
     out > buyin + 1e-9 ? 'CREATES MONEY (+$' + (out - buyin).toFixed(3) + ')' : 'ok');
 }
+// 2a) hold-to-cash-out: takes the full hold, can be cancelled, lapses without refreshes, and never pays a snake that died
+{
+  const run = (w, seconds, each) => { for (let i = 0; i < Math.round(seconds * 30); i++) { if (each) each(i); w.tick(1 / 30); } };
+  const refresh = (w) => (i) => { if (i % 30 === 0) w.startCashout('p'); };
+  const paid = (w) => w.events.some((e) => e.type === 'cashout_result');
+  const fresh = () => { const w = new GameWorld({ bots: 0 }); w.addPlayer({ id: 'p', name: 'p', buyin: 5, skinIndex: 0 }); return w; };
+  const results = [];
+
+  let w = fresh(); run(w, CFG.CASHOUT_HOLD_SEC - 0.5, refresh(w)); results.push(['not paid before the hold is over', !paid(w) && w.snakes.has('p')]);
+  run(w, 1, refresh(w)); results.push(['paid once the hold is over, for the whole stake', paid(w) && Math.abs(w.events[0].data.amount - 5) < 1e-9]);
+  w = fresh(); run(w, CFG.CASHOUT_HOLD_SEC - 1, refresh(w)); w.cancelCashout('p'); run(w, CFG.CASHOUT_HOLD_SEC, null); results.push(['letting go cancels it', !paid(w)]);
+  w = fresh(); w.startCashout('p'); run(w, CFG.CASHOUT_HOLD_SEC + 2, null); results.push(['a hold nobody refreshes lapses', !paid(w)]);
+  w = fresh(); run(w, 2, refresh(w)); w._kill(w.snakes.get('p'), 'x'); run(w, CFG.CASHOUT_HOLD_SEC, refresh(w)); results.push(['a snake killed mid-hold is not paid', !paid(w)]);
+  let bad = 0;
+  for (const [name, ok] of results) { if (!ok) bad++; console.log('hold-to-cash-out: ' + name + '  ' + (ok ? 'ok' : 'FAILED')); }
+  if (bad) process.exitCode = 1;
+}
 // 2b) a death returns the WHOLE stake to the map as orbs: nothing disappears, nothing is created
 {
   let worst = 0;

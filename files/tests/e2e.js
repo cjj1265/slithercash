@@ -55,7 +55,7 @@ function startServer(gameKp, dataFile, extraEnv) {
     const env = Object.assign({}, process.env, {
       PORT: String(PORT), GAME_WALLET_SECRET: JSON.stringify(Array.from(gameKp.secretKey)),
       DEPOSIT_MASTER_SEED: MASTER, WALLET_DATA_FILE: dataFile, DEPOSIT_POLL_MS: '4000', WITHDRAW_RATE_MAX: '100',
-      ALERT_WEBHOOK_URL: 'http://localhost:' + HOOK_PORT + '/hook',
+      ALERT_WEBHOOK_URL: 'http://localhost:' + HOOK_PORT + '/hook', CASHOUT_HOLD_SECONDS: '0.6',
     }, extraEnv || {});
     child = spawn(process.execPath, ['-r', path.join(HERE, 'fake-preload.js'), 'index.js'], { cwd: FILES, env });
     let out = '';
@@ -290,6 +290,20 @@ const errOf = (state) => (state.msgs.find((m) => m.t === 'error') || {}).message
   const junkSnap = junk.snaps[junk.snaps.length - 1];
   check('a name made only of control characters becomes the default', junkSnap && junkSnap.snakes.find((s) => s.id === junk.id).name === 'Player');
   await wsCashout(junk); junk.ws.close();
+
+  // hold-to-cash-out: the stake stays on the map for the whole hold, and letting go cancels it
+  const holder = await wsOpen(pidA, 5);
+  let paidEarly = false;
+  holder.ws.addEventListener('message', (ev) => { if (JSON.parse(ev.data).t === 'cashout_result') paidEarly = true; });
+  holder.ws.send(JSON.stringify({ t: 'cashout' }));
+  await sleep(250);
+  check('a cash-out is not paid right away (the hold has to last)', !paidEarly);
+  holder.ws.send(JSON.stringify({ t: 'cashout_cancel' }));
+  await sleep(900);
+  check('letting go cancels the cash-out', !paidEarly);
+  const held = await wsCashout(holder);
+  check('holding it out pays the buy-in back in full', held && near(held.amount, 5, 1e-6), held);
+  holder.ws.close();
 
 
   console.log('\n== withdrawals and limits (per request 0.04, per player/day 0.07, all players/day 0.10) ==');
