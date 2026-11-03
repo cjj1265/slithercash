@@ -24,7 +24,9 @@
 //                    // is deducted from that server-side balance and a cash-out
 //                    // is credited back to it. Without one it's free practice play.
 //     { t:"input",  angle, boosting }          // steering, send ~20x/sec
-//     { t:"cashout" }
+//     { t:"cashout" }                          // hold to cash out: re-send every second while held;
+//                                              // pays out after CASHOUT_HOLD_SECONDS (default 5) on the server
+//     { t:"cashout_cancel" }                   // released early
 //     { t:"ping",   ts }
 //
 //   Server -> Client
@@ -500,10 +502,14 @@ function handleMessage(connId, msg) {
     }
     case 'cashout': {
       if (!session.playerId) return;
-      session.world.requestCashout(session.playerId);
+      session.world.startCashout(session.playerId); // pays out only after the hold has lasted CASHOUT_HOLD_SEC on the server
       // NOTE: don't clear session.playerId here — drainEvents() still needs
       // to look this session up by playerId to deliver the cashout_result
       // message on the next tick. It clears playerId itself once sent.
+      break;
+    }
+    case 'cashout_cancel': {
+      if (session.playerId) session.world.cancelCashout(session.playerId);
       break;
     }
     case 'ping': {

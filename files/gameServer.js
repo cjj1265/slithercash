@@ -37,6 +37,10 @@ const CFG = {
   BOOST_DRAIN_INTERVAL: 0.11,
   GRID_CELL: 46,
   TICK_RATE: 30, // server ticks per second
+  // A cash-out has to be held this long, staying on the map and killable the whole time, so nobody can
+  // bail out the instant before dying. The server counts the time; the client only shows it.
+  CASHOUT_HOLD_SEC: process.env.CASHOUT_HOLD_SECONDS !== undefined ? Number(process.env.CASHOUT_HOLD_SECONDS) : 5,
+  CASHOUT_HOLD_LAPSE_SEC: 2, // the client re-sends the hold every second; silence this long cancels it
 };
 
 const SKIN_COUNT = 14; // must match client's SKINS.length
@@ -147,6 +151,19 @@ class GameWorld {
     if (!s || !s.alive) return;
     if (typeof angle === 'number' && isFinite(angle)) s.targetAngle = angle;
     s.boosting = !!boosting;
+  }
+
+  /** Starts (or refreshes) the hold-to-cash-out. The payout happens in tick() once the hold has lasted long enough. */
+  startCashout(id) {
+    const s = this.snakes.get(id);
+    if (!s || !s.alive) return;
+    if (s.cashoutHold === undefined || s.cashoutHold === null) s.cashoutHold = 0;
+    s.cashoutHoldSeen = this.elapsed;
+  }
+
+  cancelCashout(id) {
+    const s = this.snakes.get(id);
+    if (s) s.cashoutHold = null;
   }
 
   requestCashout(id) {
@@ -379,6 +396,14 @@ class GameWorld {
         const rank = alive.indexOf(s) + 1;
         if (rank > 0 && rank < s.bestRank) s.bestRank = rank;
       }
+    }
+
+    // Holds are settled last, so a snake that died this tick never gets paid.
+    for (const s of Array.from(this.snakes.values())) {
+      if (!s.alive || s.cashoutHold === undefined || s.cashoutHold === null) continue;
+      if (this.elapsed - s.cashoutHoldSeen > CFG.CASHOUT_HOLD_LAPSE_SEC) { s.cashoutHold = null; continue; }
+      s.cashoutHold += dt;
+      if (s.cashoutHold >= CFG.CASHOUT_HOLD_SEC) this.requestCashout(s.id);
     }
   }
 

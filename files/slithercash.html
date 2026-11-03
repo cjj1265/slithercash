@@ -258,7 +258,10 @@
     width:20px; height:20px; border-radius:50%; background:#241a08; color:var(--gold-bright);
     display:flex; align-items:center; justify-content:center; font-family:'JetBrains Mono',monospace; font-size:12px; font-weight:800; flex-shrink:0;
   }
-  #cashOutBtn.armed{ background:linear-gradient(180deg, #ff8f8f, var(--ruby)); animation:pulseArm 0.85s ease-in-out infinite; box-shadow:0 5px 0 var(--ruby-deep), 0 12px 22px rgba(0,0,0,0.4); }
+  #cashOutBtn{ touch-action:none; user-select:none; -webkit-user-select:none; --hold:0%; }
+  #cashOutBtn::before{ content:""; position:absolute; top:0; left:0; bottom:0; width:var(--hold); background:rgba(36,26,8,0.28); pointer-events:none; }
+  #cashOutBtn .co-icon, #cashOutBtn .co-text{ position:relative; z-index:1; }
+  #cashOutBtn.armed{ background:linear-gradient(180deg, #ff8f8f, var(--ruby)); box-shadow:0 5px 0 var(--ruby-deep), 0 12px 22px rgba(0,0,0,0.4); }
   #cashOutBtn.armed .co-icon{ color:var(--ruby); }
   @keyframes pulseArm{ 0%,100%{ transform:scale(1);} 50%{ transform:scale(1.045);} }
 
@@ -431,7 +434,7 @@
 <div id="cashOutWrap" class="hud-hidden">
   <button id="cashOutBtn">
     <span class="co-icon">$</span>
-    <span class="co-text"><span id="cashOutLabel">Cash Out</span> <span id="cashOutAmount">$0.00</span></span>
+    <span class="co-text"><span id="cashOutLabel">Hold to Cash Out</span> <span id="cashOutAmount">$0.00</span></span>
   </button>
 </div>
 
@@ -486,7 +489,7 @@
     </div>
 
     <button class="btn btn-gold" id="playBtn">Buy In &amp; Play</button>
-    <div class="hint">Move mouse / drag to steer &middot; hold click, space, or BOOST to speed up</div>
+    <div class="hint">Move mouse / drag to steer &middot; hold click, space, or BOOST to speed up &middot; hold Cash Out (or C) for 5 seconds to cash out</div>
   </div>
 
   <button type="button" class="choose-snake-btn" id="chooseSnakeBtn">
@@ -1952,7 +1955,7 @@ async function startGame(){
   leaderboardEl.classList.remove('hud-hidden');
   cashOutWrap.classList.remove('hud-hidden');
   cashOutBtn.classList.remove('armed');
-  cashOutLabel.textContent = 'Cash Out';
+  cashOutLabel.textContent = 'Hold to Cash Out';
   boostBtn.style.display = window.matchMedia('(pointer:coarse)').matches ? 'flex' : 'none';
   requestAnimationFrame(netFrame);
 }
@@ -1975,34 +1978,45 @@ buyinInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') startGame(); }
 againBtn.addEventListener('click', ()=> goToMenu(deathScreen));
 
 /* ============================== CASH OUT ============================== */
-let cashOutArmed = false;
-let cashOutArmTimer = null;
+/* Cashing out means holding the button (or the C key) for CASH_HOLD_MS while the snake stays on the map.
+   The server does the real timing; this only sends the hold and draws the progress. The UI moves on in
+   handleNetCashout() once the server confirms the amount. */
+const CASH_HOLD_MS = 5000;
+let cashHold = null; // { start, resend, frame } while held
 
-cashOutBtn.addEventListener('click', ()=>{
-  if(!running || deathOutro.active) return;
-  if(!cashOutArmed){
-    cashOutArmed = true;
-    cashOutBtn.classList.add('armed');
-    cashOutLabel.textContent = 'Confirm?';
-    clearTimeout(cashOutArmTimer);
-    cashOutArmTimer = setTimeout(()=>{
-      cashOutArmed = false;
-      cashOutBtn.classList.remove('armed');
-      cashOutLabel.textContent = 'Cash Out';
-    }, 2500);
-    return;
-  }
-  clearTimeout(cashOutArmTimer);
-  cashOutArmed = false;
-  performCashOut();
-});
-
-function performCashOut(){
-  if(ws && ws.readyState === WebSocket.OPEN){
-    ws.send(JSON.stringify({ t:'cashout' }));
-  }
-  // UI transition happens in handleNetCashout() once the server confirms the amount.
+function sendCashMsg(t){
+  if(ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ t }));
 }
+function beginCashHold(){
+  if(cashHold || !running || deathOutro.active) return;
+  cashHold = { start: performance.now(), resend: setInterval(()=> sendCashMsg('cashout'), 1000), frame: 0 };
+  sendCashMsg('cashout');
+  cashOutBtn.classList.add('armed');
+  const step = ()=>{
+    if(!cashHold) return;
+    if(!running || deathOutro.active){ endCashHold(); return; }
+    const p = Math.min(1, (performance.now() - cashHold.start) / CASH_HOLD_MS);
+    cashOutBtn.style.setProperty('--hold', (p * 100) + '%');
+    cashOutLabel.textContent = p >= 1 ? 'Cashing out…' : 'Hold ' + Math.ceil((1 - p) * CASH_HOLD_MS / 1000) + 's';
+    cashHold.frame = requestAnimationFrame(step);
+  };
+  step();
+}
+function endCashHold(){
+  if(!cashHold) return;
+  clearInterval(cashHold.resend);
+  cancelAnimationFrame(cashHold.frame);
+  cashHold = null;
+  sendCashMsg('cashout_cancel');
+  cashOutBtn.classList.remove('armed');
+  cashOutBtn.style.setProperty('--hold', '0%');
+  cashOutLabel.textContent = 'Hold to Cash Out';
+}
+cashOutBtn.addEventListener('pointerdown', (e)=>{ e.preventDefault(); beginCashHold(); });
+['pointerup','pointerleave','pointercancel'].forEach(ev => cashOutBtn.addEventListener(ev, endCashHold));
+window.addEventListener('keydown', (e)=>{ if(e.code === 'KeyC' && !e.repeat && document.activeElement !== nameInput && document.activeElement !== buyinInput) beginCashHold(); });
+window.addEventListener('keyup', (e)=>{ if(e.code === 'KeyC') endCashHold(); });
+window.addEventListener('blur', endCashHold);
 cashoutMenuBtn.addEventListener('click', ()=> goToMenu(cashoutScreen));
 
 /* ============================== SOLANA WALLET (devnet) ============================== */
