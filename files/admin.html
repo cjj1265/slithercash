@@ -85,6 +85,30 @@
     <div class="card"><h2>In play</h2><div id="playKv"></div></div>
   </div>
 
+  <div class="row"><div class="card wide"><h2>Playing right now</h2>
+    <div class="scroll" id="live"></div>
+    <p class="dim" style="margin-top:8px; font-size:12px;"><b>Pay out</b> takes the player out and credits what their snake is worth now. <b>Forfeit</b> drops their stake on the map like a death (use it for cheaters). <b>Ban</b> stops the wallet from buying in again and pays out any game it is in. Banned wallets can still withdraw their balance.</p>
+    <p id="liveMsg" style="margin-top:6px;"></p>
+  </div></div>
+
+  <div class="row">
+    <div class="card"><h2>Settings</h2>
+      <div id="settingsForm"></div>
+      <div style="margin-top:10px;"><button id="settingsSave" class="good">Save changes</button></div>
+      <p class="dim" style="margin-top:8px; font-size:12px;">Each setting has a fixed range, shown on the right, that cannot be exceeded from this page. Every change is logged below and announced on your alert channel.</p>
+      <p id="settingsMsg" style="margin-top:6px;"></p>
+    </div>
+    <div class="card"><h2>Banned wallets</h2><div id="bans"></div><p id="banMsg" style="margin-top:6px;"></p></div>
+  </div>
+
+  <div class="row"><div class="card wide"><h2>Activity by day (UTC, last 14 days)</h2>
+    <div id="activityNote" class="dim" style="font-size:12px; margin-bottom:8px;"></div>
+    <div id="activityBars" style="display:flex; gap:4px; align-items:flex-end; height:90px; margin-bottom:10px;"></div>
+    <div class="scroll" id="activity"></div>
+  </div></div>
+
+  <div class="row"><div class="card wide"><h2>Admin audit log</h2><div class="scroll" id="audit"></div></div></div>
+
   <div class="row"><div class="card wide"><h2>Unsettled withdrawals</h2><div id="unsettled"></div></div></div>
   <div class="row"><div class="card wide"><h2>Players (top 200 by balance)</h2><div class="scroll" id="players"></div></div></div>
   <div class="row"><div class="card wide"><h2>Recent ledger (newest first)</h2><div class="scroll" id="ledger"></div></div></div>
@@ -196,7 +220,125 @@ function render(s){
       if(rest.playerId) rest.playerId = short(rest.playerId);
       return [ts ? new Date(ts).toLocaleTimeString() : '', type || 'raw', JSON.stringify(rest)];
     }));
+  renderLive(s.live || []);
+  renderSettings(s.settings || {});
+  renderBans(s.bans || []);
+  renderActivity(s.activity);
+  table($('audit'), ['Time', 'Action', 'Detail', 'From'],
+    (s.audit || []).map(e => [e.ts ? new Date(e.ts).toLocaleString() : '', e.action || '', e.detail || '', e.ip || '']));
   $('updated').textContent = 'updated ' + new Date().toLocaleTimeString();
+}
+
+/* ---- live players, kick and ban ---- */
+function cell(tr, text, cls){ const td = document.createElement('td'); td.textContent = text; if(cls) td.className = cls; tr.appendChild(td); return td; }
+function actionBtn(label, cls, fn){ const b = document.createElement('button'); b.textContent = label; if(cls) b.className = cls; b.style.padding = '3px 8px'; b.style.marginRight = '4px'; b.addEventListener('click', fn); return b; }
+function say(id, text, cls){ $(id).textContent = text; $(id).className = cls || ''; }
+
+function renderLive(list){
+  const el = $('live'); el.textContent = '';
+  if(!list.length){ el.textContent = 'Nobody is in a game right now.'; el.className = 'scroll dim'; return; }
+  el.className = 'scroll';
+  const t = document.createElement('table');
+  const head = document.createElement('tr');
+  ['Name', 'Wallet', 'Stake (SOL)', 'Worth now (SOL)', 'Alive (s)', ''].forEach(h => { const th = document.createElement('th'); th.textContent = h; head.appendChild(th); });
+  t.appendChild(head);
+  list.forEach(p => {
+    const tr = document.createElement('tr');
+    cell(tr, p.name + (p.holdingCashout ? '  (cashing out)' : ''));
+    cell(tr, short(p.owner || ''), 'mono');
+    cell(tr, fmt(p.stakeSol));
+    cell(tr, fmt(p.valueSol), p.valueSol > p.stakeSol ? 'ok' : '');
+    cell(tr, String(p.aliveSec));
+    const td = document.createElement('td');
+    td.appendChild(actionBtn('Pay out', '', () => kick(p, false)));
+    td.appendChild(actionBtn('Forfeit', 'danger', () => kick(p, true)));
+    if(p.owner) td.appendChild(actionBtn('Ban', 'danger', () => ban(p)));
+    tr.appendChild(td);
+    t.appendChild(tr);
+  });
+  el.appendChild(t);
+}
+async function kick(p, forfeit){
+  if(!confirm((forfeit ? 'Forfeit ' : 'Pay out and remove ') + p.name + ' (' + fmt(p.valueSol) + ' SOL)?' + (forfeit ? ' Their stake drops on the map.' : ''))) return;
+  try { await api('/admin/api/kick', { method: 'POST', body: JSON.stringify({ snakeId: p.snakeId, forfeit }) }); say('liveMsg', 'Done.', 'ok'); }
+  catch(e){ say('liveMsg', e.message, 'bad'); }
+  refresh();
+}
+async function ban(p){
+  const reason = prompt('Ban ' + short(p.owner) + ' from playing? Reason (shown in the log):', 'cheating');
+  if(reason === null) return;
+  try { await api('/admin/api/ban', { method: 'POST', body: JSON.stringify({ owner: p.owner, reason }) }); say('liveMsg', 'Banned and removed from the game.', 'ok'); }
+  catch(e){ say('liveMsg', e.message, 'bad'); }
+  refresh();
+}
+
+function renderBans(list){
+  const el = $('bans'); el.textContent = '';
+  if(!list.length){ el.textContent = 'Nobody is banned.'; el.className = 'dim'; return; }
+  el.className = '';
+  list.forEach(b => {
+    const d = document.createElement('div'); d.className = 'kv';
+    const a = document.createElement('span'); a.textContent = short(b.owner) + ' · ' + b.reason + ' · ' + new Date(b.at).toLocaleDateString(); a.style.color = 'var(--text)';
+    d.appendChild(a);
+    d.appendChild(actionBtn('Unban', 'good', async () => {
+      if(!confirm('Allow ' + short(b.owner) + ' to play again?')) return;
+      try { await api('/admin/api/unban', { method: 'POST', body: JSON.stringify({ owner: b.owner }) }); say('banMsg', 'Unbanned.', 'ok'); }
+      catch(e){ say('banMsg', e.message, 'bad'); }
+      refresh();
+    }));
+    el.appendChild(d);
+  });
+}
+
+/* ---- settings ---- */
+const settingInputs = {};
+const settingDirty = new Set();
+function renderSettings(defs){
+  const form = $('settingsForm');
+  Object.keys(defs).forEach(key => {
+    const d = defs[key];
+    if(!settingInputs[key]){
+      const row = document.createElement('div'); row.className = 'kv'; row.style.alignItems = 'center';
+      const label = document.createElement('span'); label.textContent = d.label;
+      const right = document.createElement('span'); right.style.display = 'flex'; right.style.gap = '8px'; right.style.alignItems = 'center';
+      const input = document.createElement('input'); input.type = 'number'; input.step = 'any'; input.style.width = '110px';
+      input.addEventListener('input', () => settingDirty.add(key));
+      const range = document.createElement('span'); range.className = 'dim'; range.style.fontSize = '11px'; range.textContent = d.min + ' – ' + d.max;
+      right.appendChild(input); right.appendChild(range);
+      row.appendChild(label); row.appendChild(right); form.appendChild(row);
+      settingInputs[key] = input;
+    }
+    if(!settingDirty.has(key) && document.activeElement !== settingInputs[key]) settingInputs[key].value = String(Math.round(d.value * 1e6) / 1e6);
+  });
+}
+async function saveSettings(){
+  const changes = {};
+  settingDirty.forEach(k => { changes[k] = settingInputs[k].value; });
+  if(!Object.keys(changes).length){ say('settingsMsg', 'Nothing changed.', 'dim'); return; }
+  if(!confirm('Save these changes?\n' + Object.keys(changes).map(k => k + ' = ' + changes[k]).join('\n'))) return;
+  try {
+    await api('/admin/api/settings', { method: 'POST', body: JSON.stringify({ changes }) });
+    settingDirty.clear(); say('settingsMsg', 'Saved.', 'ok');
+  } catch(e){ say('settingsMsg', e.message, 'bad'); }
+  refresh();
+}
+
+/* ---- activity by day ---- */
+function renderActivity(a){
+  if(!a) return;
+  const days = a.days;
+  $('activityNote').textContent = 'All time (from the log): ' + a.totalGames + ' games, ' + fmt(a.totalVolumeSol) + ' SOL played. Bars show games per day.';
+  const bars = $('activityBars'); bars.textContent = '';
+  const max = Math.max(1, ...days.map(d => d.games));
+  days.forEach(d => {
+    const b = document.createElement('div');
+    b.style.cssText = 'flex:1; background:var(--gold); opacity:0.75; border-radius:3px 3px 0 0; min-height:2px;';
+    b.style.height = Math.max(2, Math.round(d.games / max * 88)) + 'px';
+    b.title = d.date + ': ' + d.games + ' games';
+    bars.appendChild(b);
+  });
+  table($('activity'), ['Day', 'Games', 'Players', 'New', 'Played (SOL)', 'House fees (SOL)', 'Deposited', 'Withdrawn'],
+    days.slice().reverse().map(d => [d.date, String(d.games), String(d.activePlayers), String(d.newPlayers), fmt(d.volumeSol), fmt(d.feesSol), fmt(d.depositsSol), fmt(d.withdrawnSol)]));
 }
 
 async function refresh(){
@@ -269,6 +411,7 @@ $('signOut').addEventListener('click', ()=> signOut());
 $('pauseBtn').addEventListener('click', ()=>{ if(confirm('Pause buy-ins and withdrawals?')) control('/admin/api/pause', { paused: true, reason: $('pauseReason').value || 'manual' }, 'Paused.'); });
 $('resumeBtn').addEventListener('click', ()=> control('/admin/api/pause', { paused: false }, 'Resumed.'));
 $('earnBtn').addEventListener('click', withdrawEarnings);
+$('settingsSave').addEventListener('click', saveSettings);
 $('earnMaxBtn').addEventListener('click', ()=>{ if(lastEarnings) $('earnAmount').value = String(Math.floor(lastEarnings.maxNowSol * 1e9) / 1e9); });
 $('alertBtn').addEventListener('click', ()=> control('/admin/api/test-alert', {}, 'Test alert sent (check your channel).'));
 
