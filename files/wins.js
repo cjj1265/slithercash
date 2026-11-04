@@ -36,7 +36,7 @@ async function postWin(data) {
   const sign = data.profit >= 0 ? '+' : '-';
   const sym = data.sym === 'sol' ? '◎' : '$';
   const amount = Math.abs(data.profit) >= 1 ? Math.abs(data.profit).toFixed(2) : Math.abs(data.profit).toFixed(3);
-  const content = '**@' + plain(data.name || 'Player') + '** cashed out **' + sign + sym + amount + '** (' + (data.pct >= 0 ? '+' : '-') + Math.abs(data.pct).toFixed(2) + '%) · verified win';
+  const content = '**@' + plain(data.name || 'Player') + '** cashed out **' + sign + sym + amount + '** (' + (data.pct >= 0 ? '+' : '-') + Math.abs(data.pct).toFixed(2) + '%) · ' + (data.profit > 0 ? 'verified win' : 'verified cash-out');
   const form = new FormData();
   form.append('payload_json', JSON.stringify({ content, username: 'SnakePay Wins', allowed_mentions: { parse: [] } }));
   form.append('files[0]', new Blob([png], { type: 'image/png' }), 'snakepay-win.png');

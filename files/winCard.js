@@ -68,7 +68,7 @@ function drawAmount(c, p, x, baseY, font, size, color, align) {
 
 const LAYERS = {
   header(c, d) {
-    const accent = GOLD, MID = FACE_W / 2;
+    const accent = d.profit >= 0 ? GOLD : RED, MID = FACE_W / 2; // a cash-out below the buy-in is drawn in red
     c.save();
     c.font = 'italic 800 92px ' + EXO; c.textBaseline = 'alphabetic';
     const wA = c.measureText('snakepay').width, wB = c.measureText('.lol').width, wx = MID - (wA + wB) / 2;
@@ -89,8 +89,8 @@ const LAYERS = {
     c.restore();
   },
 
-  title(c) {
-    const MID = FACE_W / 2;
+  title(c, d) {
+    const win = d.profit >= 0, MID = FACE_W / 2;
     const tA = 'CASHED ', tB = 'OUT';
     c.save();
     c.font = 'italic 900 118px ' + EXO;
@@ -98,18 +98,18 @@ const LAYERS = {
     c.textBaseline = 'alphabetic';
     c.shadowColor = 'rgba(255,255,255,0.18)'; c.shadowBlur = 14;
     c.fillStyle = '#ffffff'; c.fillText(tA, tx, 262);
-    c.shadowColor = 'rgba(255,200,40,0.45)';
-    c.fillStyle = GOLD; c.fillText(tB, tx + twA, 262);
+    c.shadowColor = win ? 'rgba(255,200,40,0.45)' : 'rgba(230,70,92,0.45)';
+    c.fillStyle = win ? GOLD : RED; c.fillText(tB, tx + twA, 262);
     c.restore();
   },
 
   bar(c, d) {
-    const ink = '#0b0b0b', MID = FACE_W / 2;
+    const win = d.profit >= 0, ink = win ? '#0b0b0b' : '#ffffff', MID = FACE_W / 2;
     c.save();
     const barW = 890, barH = 112, barX = MID - barW / 2, barY = 296;
     const fill = c.createLinearGradient(0, barY, 0, barY + barH);
-    fill.addColorStop(0, '#ffd84a'); fill.addColorStop(1, '#f2a900');
-    c.shadowColor = 'rgba(255,200,40,0.55)'; c.shadowBlur = 36;
+    if (win) { fill.addColorStop(0, '#ffd84a'); fill.addColorStop(1, '#f2a900'); } else { fill.addColorStop(0, '#ef5b70'); fill.addColorStop(1, '#b52a3d'); }
+    c.shadowColor = win ? 'rgba(255,200,40,0.55)' : 'rgba(230,70,92,0.5)'; c.shadowBlur = 36;
     c.fillStyle = fill; c.beginPath(); c.roundRect(barX, barY, barW, barH, barH / 2); c.fill();
     c.shadowBlur = 0;
     const head = parts(d.profit, true, d.sym), headNum = { sign: head.sign, sym: null, num: head.num };
@@ -140,7 +140,7 @@ const LAYERS = {
     const pct = (d.pct >= 0 ? '+' : '-') + Math.abs(d.pct).toFixed(2) + '%';
     c.textAlign = 'center'; c.textBaseline = 'alphabetic';
     ['PNL', 'Invested', 'Position'].forEach((l, i) => { c.font = '500 34px ' + SG; c.fillStyle = '#9a9a9a'; c.fillText(l, centers[i], by + 50); });
-    c.font = '700 52px ' + SG; c.fillStyle = '#4be04b'; c.fillText(pct, centers[0], by + 105);
+    c.font = '700 52px ' + SG; c.fillStyle = d.profit >= 0 ? '#4be04b' : RED; c.fillText(pct, centers[0], by + 105);
     drawAmount(c, parts(d.invested, false, d.sym), centers[1], by + 105, '700 52px ' + SG, 52, '#ffffff', 'center');
     drawAmount(c, parts(d.position, false, d.sym), centers[2], by + 105, '700 52px ' + SG, 52, '#ffffff', 'center');
     c.restore();

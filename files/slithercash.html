@@ -2072,7 +2072,7 @@ const FACE_W = 1100, FACE_H = 640; // the card is drawn at this size and scaled 
    other. d.kind is 'win' or 'loss'. */
 const FACE_LAYERS = {
   header(c, d){
-    const win = d.kind !== 'loss', accent = win ? GOLD : RED, MID = FACE_W / 2;
+    const win = (d.kind !== 'loss' && d.profit >= 0), accent = win ? GOLD : RED, MID = FACE_W / 2;
     c.save();
     c.font = 'italic 800 92px ' + EXO; c.textBaseline = 'alphabetic';
     const wA = c.measureText('snakepay').width, wB = c.measureText('.lol').width, wx = MID - (wA + wB) / 2;
@@ -2095,7 +2095,7 @@ const FACE_LAYERS = {
   },
 
   title(c, d){
-    const win = d.kind !== 'loss', accent = win ? GOLD : RED, MID = FACE_W / 2;
+    const win = (d.kind !== 'loss' && d.profit >= 0), accent = win ? GOLD : RED, MID = FACE_W / 2;
     const tA = d.titleA + ' ', tB = d.titleB;
     c.save();
     let ts = 118;
@@ -2110,7 +2110,7 @@ const FACE_LAYERS = {
   },
 
   bar(c, d){
-    const win = d.kind !== 'loss', ink = win ? '#0b0b0b' : '#ffffff', MID = FACE_W / 2;
+    const win = (d.kind !== 'loss' && d.profit >= 0), ink = win ? '#0b0b0b' : '#ffffff', MID = FACE_W / 2;
     c.save();
     const barW = 890, barH = 112, barX = MID - barW / 2, barY = 296;
     const fill = c.createLinearGradient(0, barY, 0, barY + barH);
@@ -2138,7 +2138,7 @@ const FACE_LAYERS = {
   },
 
   stats(c, d){
-    const win = d.kind !== 'loss';
+    const win = (d.kind !== 'loss' && d.profit >= 0);
     c.save();
     const bx = 50, by = 432, bw = FACE_W - 100, bh = 124;
     c.fillStyle = '#0e0e0e'; c.beginPath(); c.roundRect(bx, by, bw, bh, 30); c.fill();
