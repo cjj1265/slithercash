@@ -48,7 +48,7 @@ const CFG = {
   MIN_PLAY_SEC: process.env.MIN_PLAY_SECONDS !== undefined ? Number(process.env.MIN_PLAY_SECONDS) : 10,
 };
 
-const SKIN_COUNT = 14; // must match client's SKINS.length
+const SKIN_COUNT = 9; // must match client's SKINS.length (and SKIN_TIERS in solanaWallet.js)
 const BOOST_BURN = 1.4; // length a snake burns per boost tick
 
 function rand(a, b) { return a + Math.random() * (b - a); }
@@ -442,4 +442,4 @@ class GameWorld {
 function round1(n) { return Math.round(n * 10) / 10; }
 function round3(n) { return Math.round(n * 1000) / 1000; }
 
-module.exports = { GameWorld, CFG };
+module.exports = { GameWorld, CFG, SKIN_COUNT };

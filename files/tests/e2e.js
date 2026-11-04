@@ -116,12 +116,12 @@ const depositAndWait = async (kp, pid, addr, solAmount, expectTotal) => {
 };
 
 // ---- websocket helpers ----
-function wsOpen(walletId, buyin, name) {
+function wsOpen(walletId, buyin, name, skinIndex) {
   return new Promise((resolve) => {
     const ws = new WebSocket('ws://localhost:' + PORT);
     const state = { ws, msgs: [], snaps: [], id: null };
     const timer = setTimeout(() => resolve(state), 6000);
-    ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name: name || 'e2e', buyin, skinIndex: 0, walletId }));
+    ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name: name || 'e2e', buyin, skinIndex: skinIndex || 0, walletId }));
     ws.onmessage = (ev) => {
       const m = JSON.parse(ev.data);
       if (m.t === 'snapshot') { state.snaps.push(m); return; }
@@ -445,11 +445,52 @@ const errOf = (state) => (state.msgs.find((m) => m.t === 'error') || {}).message
   const fin = (await admin('GET', '/admin/api/status')).json;
   check('still solvent after all of that, surplus unchanged', fin.solvency.ok && near(fin.solvency.surplusSol, S1, 0.0001), fin.solvency);
 
+  console.log('\n== skins: free, paid, owned per wallet ==');
+  const cfgS = (await http_('GET', '/api/config')).json;
+  check('config lists the skin prices', cfgS.skinPrices && cfgS.skinPrices.rare === 0.03 && cfgS.skinPrices.epic === 0.08 && cfgS.skinPrices.legendary === 0.25, cfgS.skinPrices);
+  const sk0 = await http_('GET', '/api/skins', undefined, HA);
+  check('a new wallet owns no paid skins', sk0.status === 200 && Array.isArray(sk0.json.owned) && sk0.json.owned.length === 0, sk0);
+  check('skins need a signed-in wallet', (await http_('GET', '/api/skins')).status === 401);
+  const skinOf = async (state) => { await sleep(500); const sn = state.snaps[state.snaps.length - 1]; const me = sn && sn.snakes.find((s) => s.id === state.id); return me ? me.skinIndex : null; };
+  const noOwn = await wsOpen(pidA, 5, 'e2e', 5);
+  check('a paid skin the wallet does not own falls back to the default', (await skinOf(noOwn)) === 0);
+  await wsCashout(noOwn); noOwn.ws.close();
+  const freeOwn = await wsOpen(pidA, 5, 'e2e', 2);
+  check('a free skin can be used by anyone', (await skinOf(freeOwn)) === 2);
+  await wsCashout(freeOwn); freeOwn.ws.close();
+  check('buying a free skin is refused', (await http_('POST', '/api/buy-skin', { skin: 1 }, HA)).status === 400);
+  check('buying an unknown skin is refused', (await http_('POST', '/api/buy-skin', { skin: 99 }, HA)).status === 400);
+  const tooDear = await http_('POST', '/api/buy-skin', { skin: 7 }, HA);
+  check('not enough balance for a legendary skin -> 402 and nothing taken', tooDear.status === 402 && near((await balanceOf(pidA)).sol, 0.08), tooDear);
+  check('buying needs a signed-in wallet', (await http_('POST', '/api/buy-skin', { skin: 3 })).status === 401);
+  const buy1 = await http_('POST', '/api/buy-skin', { skin: 3 }, HA);
+  check('buying a rare skin takes the price from the balance and records it', buy1.status === 200 && buy1.json.owned.includes(3) && near((await balanceOf(pidA)).sol, 0.05), buy1);
+  const buy2 = await http_('POST', '/api/buy-skin', { skin: 3 }, HA);
+  check('buying it again is refused and costs nothing', buy2.status === 409 && near((await balanceOf(pidA)).sol, 0.05), buy2);
+  const useOwn = await wsOpen(pidA, 5, 'e2e', 3);
+  check('the wallet that bought it can play with it', (await skinOf(useOwn)) === 3);
+  await wsCashout(useOwn); useOwn.ws.close();
+  const useOther = await wsOpen(pidB, 5, 'e2e', 3);
+  check('another wallet cannot use it', (await skinOf(useOther)) === 0);
+  await wsCashout(useOther); useOther.ws.close();
+  const stSk = (await admin('GET', '/admin/api/status')).json;
+  check('the sale is house income: surplus up by the price, shown as skin sales', stSk.solvency.ok && near(stSk.solvency.surplusSol, S1 + 0.03, 0.0001) && near(stSk.earnings.skinSalesSol, 0.03), [stSk.solvency, stSk.earnings]);
+  await admin('POST', '/admin/api/settings', { changes: { skinPriceEpic: 0.04 } });
+  check('the admin can change a price and the config follows', (await http_('GET', '/api/config')).json.skinPrices.epic === 0.04);
+  await admin('POST', '/admin/api/pause', { paused: true, reason: 'skin test' });
+  check('skin purchases are refused while paused', (await http_('POST', '/api/buy-skin', { skin: 5 }, HA)).status === 503);
+  await admin('POST', '/admin/api/pause', { paused: false });
+  const buy3 = await http_('POST', '/api/buy-skin', { skin: 5 }, HA);
+  check('after the price change, an epic skin costs the new price', buy3.status === 200 && near((await balanceOf(pidA)).sol, 0.01), buy3);
+  await admin('POST', '/admin/api/settings', { changes: { skinPriceEpic: 0.08 } });
+  check('skin purchases are in the activity table', ((await admin('GET', '/admin/api/status')).json.activity.days.slice(-1)[0].skinsSol) >= 0.07);
+
   console.log('\n== persistence ==');
   await stopServer();
   await startServer(game, DATA, LIMIT_ENV);
   await sleep(10000);
-  check('balances survive restart, nothing re-credited', near((await balanceOf(pidA)).sol, 0.08) && near((await balanceOf(pidB)).sol, 0.06), [await balanceOf(pidA), await balanceOf(pidB)]);
+  check('balances survive restart, nothing re-credited', near((await balanceOf(pidA)).sol, 0.01) && near((await balanceOf(pidB)).sol, 0.06), [await balanceOf(pidA), await balanceOf(pidB)]);
+  check('bought skins survive a restart', ((await http_('GET', '/api/skins', undefined, HA)).json.owned || []).join() === '3,5');
   const ledger = fs.readFileSync(DATA + '.ledger.jsonl', 'utf8').trim().split('\n').map((l) => JSON.parse(l));
   const types = ledger.map((l) => l.type);
   check('ledger covers deposit, dust, sweep, buyin, cashout, withdraw, pause', ['deposit', 'deposit_rejected_dust', 'sweep', 'buyin', 'cashout', 'withdraw_ok', 'paused', 'resumed'].every((t) => types.includes(t)), types);

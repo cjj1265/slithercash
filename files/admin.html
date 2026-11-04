@@ -182,6 +182,7 @@ function render(s){
     ['Available to take', fmt(e.availableSol) + ' SOL'],
     ['  can be taken right now', fmt(e.maxNowSol) + ' SOL'],
     ['Fees collected (all time)', fmt(e.feesCollectedSol) + ' SOL'],
+    ['  of which skin sales', fmt(e.skinSalesSol || 0) + ' SOL'],
     ['Already taken', fmt(e.takenSol) + ' SOL'],
     ['House fee', e.rakePercent + '% of cash-out profit'],
     ['Network costs paid', fmt(e.networkCostsSol) + ' SOL'],
@@ -337,8 +338,8 @@ function renderActivity(a){
     b.title = d.date + ': ' + d.games + ' games';
     bars.appendChild(b);
   });
-  table($('activity'), ['Day', 'Games', 'Players', 'New', 'Played (SOL)', 'House fees (SOL)', 'Deposited', 'Withdrawn'],
-    days.slice().reverse().map(d => [d.date, String(d.games), String(d.activePlayers), String(d.newPlayers), fmt(d.volumeSol), fmt(d.feesSol), fmt(d.depositsSol), fmt(d.withdrawnSol)]));
+  table($('activity'), ['Day', 'Games', 'Players', 'New', 'Played (SOL)', 'House fees (SOL)', 'Skins (SOL)', 'Deposited', 'Withdrawn'],
+    days.slice().reverse().map(d => [d.date, String(d.games), String(d.activePlayers), String(d.newPlayers), fmt(d.volumeSol), fmt(d.feesSol), fmt(d.skinsSol || 0), fmt(d.depositsSol), fmt(d.withdrawnSol)]));
 }
 
 async function refresh(){

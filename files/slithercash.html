@@ -220,7 +220,9 @@
     background:radial-gradient(ellipse at center, rgba(18,74,51,0.35), rgba(5,8,6,0.9));
     border:1px solid var(--hairline); box-shadow:inset 0 0 30px rgba(0,0,0,0.4);
   }
-  .skin-name-big{ margin-top:14px; font-family:'Space Grotesk',sans-serif; font-size:16px; font-weight:700; letter-spacing:0.5px; color:var(--white-muted); }
+  .skin-tier{ margin-top:14px; font-family:'Space Grotesk',sans-serif; font-size:15px; font-weight:700; letter-spacing:2px; }
+  .skin-price{ margin-top:4px; font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--white-muted); }
+  .skin-msg{ min-height:16px; margin-top:8px; font-size:12px; color:var(--dim); }
   .skin-index{ margin-top:3px; font-size:10.5px; color:var(--dim); letter-spacing:1px; }
   .skin-side-arrow{
     position:absolute; top:50%; transform:translateY(-50%); width:50px; height:50px; border-radius:50%;
@@ -322,7 +324,7 @@
     background:rgba(255,255,255,0.05); border:1px solid var(--hairline); transition:color .15s, border-color .15s, transform .15s; }
   .social-links a:hover{ color:var(--gold-bright); border-color:var(--gold-bright); transform:translateY(-2px); }
   .social-links svg{ width:20px; height:20px; fill:currentColor; }
-  .online-pill{ position:absolute; top:20px; left:50%; transform:translateX(-50%); display:flex; align-items:center; gap:8px; padding:7px 16px; border-radius:999px;
+  .online-pill{ position:absolute; top:17px; left:138px; display:flex; align-items:center; gap:8px; padding:7px 16px; border-radius:999px;
     background:rgba(255,255,255,0.05); border:1px solid var(--hairline); font-family:'JetBrains Mono',monospace; font-size:12.5px; color:var(--white-muted); white-space:nowrap; }
   .online-pill b{ color:var(--gold-bright); font-weight:800; }
   .online-pill i{ width:8px; height:8px; border-radius:50%; background:#43d17a; box-shadow:0 0 8px rgba(67,209,122,0.8); }
@@ -538,9 +540,12 @@
   <div class="panel">
     <div class="skin-select-title">Choose Your Snake</div>
     <canvas id="skinSelectPreview" width="310" height="132"></canvas>
-    <div id="skinSelectName" class="skin-name-big">Gold Rush</div>
-    <div id="skinSelectIndex" class="skin-index">1 / 14</div>
-    <button class="btn btn-ghost" id="skinDoneBtn">Done</button>
+    <div id="skinTier" class="skin-tier">COMMON</div>
+    <div id="skinPriceNote" class="skin-price">Free</div>
+    <div id="skinSelectIndex" class="skin-index">1 / 9</div>
+    <button class="btn btn-gold" id="skinActionBtn">Use this snake</button>
+    <div id="skinMsg" class="skin-msg"></div>
+    <button class="btn btn-ghost" id="skinDoneBtn">Back</button>
   </div>
   <button type="button" class="skin-side-arrow right" id="skinSelNext" aria-label="Next skin">&#10095;</button>
 </div>
@@ -641,23 +646,53 @@ const CFG = {
   DEATH_OUTRO_ZOOM: 0.34,
 };
 
-const SKINS = [
-  {name:"Gold Rush",         colors:["#f2c94c"],            glow:"#ffe9a8"},
-  {name:"Ice Cold",          colors:["#6fe7dd"],            glow:"#c8fff9"},
-  {name:"Ruby High Roller",  colors:["#e63950"],            glow:"#ff9aa6"},
-  {name:"Emerald Table",     colors:["#7ee787"],            glow:"#d3ffd6"},
-  {name:"Amethyst",          colors:["#c77dff"],            glow:"#ecd6ff"},
-  {name:"Sapphire",          colors:["#5aa9ff"],            glow:"#c6e2ff"},
-  {name:"Silver Chip",       colors:["#dfe3e8"],            glow:"#ffffff"},
-  {name:"Neon Mint",         colors:["#39d98a"],            glow:"#b9ffe0"},
-  {name:"Royal Flush",       colors:["#f2c94c","#e63950"],  glow:"#ffe9a8"},
-  {name:"Poison Dart",       colors:["#39d98a","#0d3324"],  glow:"#b9ffe0"},
-  {name:"Blue Chip",         colors:["#5aa9ff","#0b2036"],  glow:"#c6e2ff"},
-  {name:"Zebra Stack",       colors:["#f3ecd9","#141414"],  glow:"#ffffff"},
-  {name:"Hot Pink Fade",     colors:["#ff6ec7","#c77dff"],  glow:"#ffd1ec"},
-  {name:"Amber Blaze",       colors:["#ff9f45","#e63950"],  glow:"#ffd9ad"},
-];
+/* ---------- Skins ----------
+   Order matters: index i here is skin i in SKIN_TIERS (solanaWallet.js) and SKIN_COUNT (gameServer.js).
+   Common skins are free; rare, epic and legendary are bought once per wallet. The epic and legendary
+   ones are animated: colorAt(index along the body from the head, body length, seconds) gives each piece
+   of the body its colour for that moment. Colours are rounded to a few steps so neighbouring pieces match
+   and are drawn as one stroke (cheap). `colors` is the single flat colour used for far-away snakes. */
+const hex2rgb = c => c.charAt(0) === '#' ? [parseInt(c.slice(1,3),16), parseInt(c.slice(3,5),16), parseInt(c.slice(5,7),16)] : c.match(/\d+/g).map(Number); // '#rrggbb' or 'rgb(r,g,b)'
+function mixHex(a, b, t){ const A = hex2rgb(a), B = hex2rgb(b); return 'rgb(' + A.map((v,i)=> Math.round(v + (B[i]-v)*t)).join(',') + ')'; }
+const qStep = (v, n) => Math.round(Math.min(1, Math.max(0, v)) * n) / n;
+const CANDLE_PATTERN = [1,1,0,1,0,0,1,0,0,1,1,0];
 
+const SKINS = [
+  { tier:'common', colors:['#f2c94c'], glow:'#ffe9a8' },
+  { tier:'common', colors:['#e63950'], glow:'#ff9aa6' },
+  { tier:'common', colors:['#5aa9ff'], glow:'#c6e2ff' },
+  // rare: purple to teal along the body, and green / red candles
+  { tier:'rare', colors:['#5ec8c0'], glow:'#9dffd5',
+    colorAt:(i, L)=> mixHex('#9945ff', '#14f195', qStep(i / Math.max(1, L - 1), 10)) },
+  { tier:'rare', colors:['#26d07c'], glow:'#d9ffe9',
+    colorAt:(i)=> CANDLE_PATTERN[Math.floor(i / 4) % CANDLE_PATTERN.length] ? '#26d07c' : '#ef4a5f' },
+  // epic (animated): glowing cracks that flow toward the head, and green code streaks
+  { tier:'epic', animated:true, aura:true, colors:['#ff6a1a'], glow:'#ff8a3d',
+    colorAt:(i, L, t)=>{
+      const v = qStep(((Math.sin(i * 0.42 - t * 2.6) + 0.6 * Math.sin(i * 0.97 - t * 1.9)) / 1.6 + 1) / 2, 6);
+      return v > 0.8 ? mixHex('#ff7a1a', '#ffd27a', (v - 0.8) / 0.2) : mixHex('#2a1210', '#ff5a14', v / 0.8);
+    } },
+  { tier:'epic', animated:true, aura:true, colors:['#1fbf5a'], glow:'#39ff88',
+    colorAt:(i, L, t)=>{
+      const pos = ((i * 0.55 + t * 9) % 8) / 8;
+      if(pos < 0.22) return mixHex('#1fbf5a', '#d6ffe3', qStep(1 - pos / 0.22, 4));
+      return mixHex('#03120a', '#0e5a2a', qStep(0.5 + 0.5 * Math.sin(i * 1.7), 3));
+    } },
+  // legendary (animated): a flowing rainbow crystal with sparkles, and liquid gold with a sweeping shine
+  { tier:'legendary', animated:true, aura:true, sparkle:'#ffffff', colors:['#bfe3ff'], glow:'#ffffff',
+    colorAt:(i, L, t)=>{
+      const hue = (((i * 11 - t * 70) % 360) + 360) % 360;
+      return 'hsl(' + (Math.round(hue / 15) * 15) + ',85%,80%)';
+    } },
+  { tier:'legendary', animated:true, aura:true, sparkle:'#fff7c9', colors:['#f5c518'], glow:'#fff0a8',
+    colorAt:(i, L, t)=>{
+      const u = i / Math.max(1, L - 1);
+      const centre = 1.3 - ((t * 0.7) % 1.6);                       // the shine travels from the tail to the head
+      const shine = Math.max(0, 1 - Math.abs(u - centre) / 0.14);
+      const base = mixHex('#a87408', '#f5c518', qStep(0.5 + 0.5 * Math.sin(i * 0.55), 3));
+      return mixHex(base, '#fff7c9', qStep(shine, 5));
+    } },
+];
 const BOT_NAME_PARTS1 = ["Big","Lucky","Silk","Cold","High","Fast","Slick","Diamond","Royal","Iron","Neon","Velvet","Turbo","Ghost","Prime"];
 const BOT_NAME_PARTS2 = ["Roller","Stacker","Hustler","Baron","Whale","Grinder","Shark","Bandit","Ace","Fox","Viper","Comet","Dealer","Chip","Runner"];
 function randName(){
@@ -1246,10 +1281,12 @@ function drawSmoothPath(pctx, pts){
 function drawColorBands(pctx, pts, colors, r, timeShift, bandLenOverride){
   const bandLen = bandLenOverride || 5;
   const L = pts.length;
+  // `colors` is either a list of colours that repeat in bands, or a function (index, length) -> colour string
+  const byFn = typeof colors === 'function';
   pctx.lineJoin = 'round'; pctx.lineCap = 'round';
   if(L < 3){
     pctx.beginPath(); drawSmoothPath(pctx, pts);
-    pctx.strokeStyle = colors[0]; pctx.lineWidth = r*2; pctx.stroke();
+    pctx.strokeStyle = byFn ? colors(0, L) : colors[0]; pctx.lineWidth = r*2; pctx.stroke();
     return;
   }
   function anchor(k){
@@ -1258,6 +1295,7 @@ function drawColorBands(pctx, pts, colors, r, timeShift, bandLenOverride){
     return { x:(pts[k].x+pts[k+1].x)/2, y:(pts[k].y+pts[k+1].y)/2 };
   }
   function bandOf(idx){
+    if(byFn) return colors(idx, L);
     return (((Math.floor((idx+timeShift)/bandLen))%colors.length)+colors.length)%colors.length;
   }
   const totalPieces = L-1; // piece indices 0..L-2; piece L-2 is the tail cap
@@ -1278,10 +1316,51 @@ function drawColorBands(pctx, pts, colors, r, timeShift, bandLenOverride){
         pctx.quadraticCurveTo(pts[L-2].x, pts[L-2].y, pts[L-1].x, pts[L-1].y);
       }
     }
-    pctx.strokeStyle = colors[band];
+    pctx.strokeStyle = byFn ? band : colors[band];
     pctx.lineWidth = r*2;
     pctx.stroke();
     k = j;
+  }
+}
+
+/* The body colour for a skin: a function-coloured (patterned or animated) skin, or a flat/banded one. */
+function paintBody(c, pts, r, skin, seed, bandLen){
+  if(skin.colorAt){
+    const t = performance.now() / 1000;
+    drawColorBands(c, pts, (i, L)=> skin.colorAt(i, L, t), r, seed, bandLen);
+  } else if(skin.colors.length > 1){
+    drawColorBands(c, pts, skin.colors, r, seed, bandLen);
+  } else {
+    c.beginPath(); drawSmoothPath(c, pts);
+    c.strokeStyle = skin.colors[0]; c.lineWidth = r*2; c.stroke();
+  }
+}
+
+/* A soft glow around an animated skin, and little twinkling stars on the legendary ones. */
+function drawSkinExtras(c, pts, r, skin){
+  if(r <= 3 || !(skin.aura || skin.sparkle)) return;
+  const t = performance.now() / 1000;
+  if(skin.aura){
+    c.save();
+    c.shadowColor = skin.glow; c.shadowBlur = (9 + 5 * Math.sin(t * 3.2)) * Math.max(0.6, r / 12);
+    c.globalAlpha = 0.28; c.lineJoin = 'round'; c.lineCap = 'round';
+    c.beginPath(); drawSmoothPath(c, pts); c.strokeStyle = skin.glow; c.lineWidth = r * 1.1; c.stroke();
+    c.restore();
+  }
+  if(skin.sparkle && pts.length > 4 && r > 4){
+    c.save(); c.strokeStyle = skin.sparkle; c.fillStyle = skin.sparkle; c.lineCap = 'round';
+    for(let k = 0; k < 4; k++){
+      const cyc = t * 1.3 + k * 0.29, ph = cyc - Math.floor(cyc);            // each star lives about 0.75 seconds
+      const idx = (Math.floor(cyc) * 31 + k * 17) % (pts.length - 1);
+      const alpha = Math.sin(ph * Math.PI);
+      const p = pts[idx + 1], ox = Math.sin(idx * 12.9 + k) * r * 0.4, oy = Math.cos(idx * 7.7 + k) * r * 0.4;
+      const s = r * (0.35 + 0.55 * alpha);
+      c.globalAlpha = alpha;
+      c.lineWidth = Math.max(1, r * 0.1);
+      c.beginPath(); c.moveTo(p.x + ox - s, p.y + oy); c.lineTo(p.x + ox + s, p.y + oy); c.moveTo(p.x + ox, p.y + oy - s); c.lineTo(p.x + ox, p.y + oy + s); c.stroke();
+      c.beginPath(); c.arc(p.x + ox, p.y + oy, Math.max(1, r * 0.1), 0, Math.PI * 2); c.fill();
+    }
+    c.restore();
   }
 }
 
@@ -1346,12 +1425,9 @@ function drawSnakeBody(snake){
   ctx.beginPath(); drawSmoothPath(ctx, shadowPts);
   ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = r*1.15; ctx.stroke();
 
-  if(snake.colors.length > 1){
-    drawColorBands(ctx, screenPts, snake.colors, r, snake.colorSeed || 0);
-  } else {
-    ctx.beginPath(); drawSmoothPath(ctx, screenPts);
-    ctx.strokeStyle = snake.colors[0]; ctx.lineWidth = r*2; ctx.stroke();
-  }
+  const skin = SKINS[snake.skinIndex] || SKINS[0];
+  paintBody(ctx, screenPts, r, skin, snake.colorSeed || 0);
+  drawSkinExtras(ctx, screenPts, r, skin);
 
   // broad top-lit highlight (rounds the tube)
   ctx.beginPath(); drawSmoothPath(ctx, highlightPts);
@@ -1527,12 +1603,8 @@ function renderPreviewSnake(pctx, w, h, skin, t, id){
   pctx.beginPath(); drawSmoothPath(pctx, pts);
   pctx.strokeStyle = 'rgba(0,0,0,0.35)'; pctx.lineWidth = r*2+3; pctx.stroke();
 
-  if(skin.colors.length>1){
-    drawColorBands(pctx, pts, skin.colors, r, (id||0)*1.7, 2);
-  } else {
-    pctx.beginPath(); drawSmoothPath(pctx, pts);
-    pctx.strokeStyle = skin.colors[0]; pctx.lineWidth = r*2; pctx.stroke();
-  }
+  paintBody(pctx, pts, r, skin, (id||0)*1.7, 2);
+  drawSkinExtras(pctx, pts, r, skin);
 
   const hlPts = pts.map(p=>({x:p.x, y:p.y - r*0.3}));
   pctx.beginPath(); drawSmoothPath(pctx, hlPts);
@@ -1571,9 +1643,23 @@ function stopMiniPreview(){ miniRunning = false; clearInterval(miniSwitchTimer);
 /* ============================== SKIN SELECT SCREEN ============================== */
 const skinSelectPreview = document.getElementById('skinSelectPreview');
 const skinSelectCtx = skinSelectPreview.getContext('2d');
-const skinSelectName = document.getElementById('skinSelectName');
+const skinTierEl = document.getElementById('skinTier');
+const skinPriceNote = document.getElementById('skinPriceNote');
 const skinSelectIndex = document.getElementById('skinSelectIndex');
-let selectedSkinIndex = 0;
+const skinActionBtn = document.getElementById('skinActionBtn');
+const skinMsg = document.getElementById('skinMsg');
+const SKIN_TIER_LABEL = { common:'COMMON', rare:'RARE', epic:'EPIC', legendary:'LEGENDARY' };
+const SKIN_TIER_COLOR = { common:'#9aa59d', rare:'#5aa9ff', epic:'#c77dff', legendary:'#f2c94c' };
+let skinPrices = { rare: 0.03, epic: 0.08, legendary: 0.25 }; // replaced by the server's current prices
+let ownedSkins = new Set();                                      // paid skins this wallet owns (from the server)
+const skinOwned = (i)=> SKINS[i].tier === 'common' || ownedSkins.has(i);
+let selectedSkinIndex = 0;   // the skin being looked at
+let equippedSkinIndex = 0;   // the skin used to play
+try{ const s = parseInt(localStorage.getItem('sp_skin'), 10); if(Number.isInteger(s) && s >= 0 && s < SKINS.length) equippedSkinIndex = s; }catch(e){}
+function equipSkin(i){ equippedSkinIndex = i; try{ localStorage.setItem('sp_skin', String(i)); }catch(e){} }
+/** What to join with: the equipped skin, or the default if it is a paid one this wallet does not own. */
+const usableSkin = ()=> skinOwned(equippedSkinIndex) ? equippedSkinIndex : 0;
+const solPrice = (p)=> '◎' + p.toFixed(3);
 let bigRunning = false, bigT = 0;
 
 function drawBigPreview(){
@@ -1587,10 +1673,49 @@ function stopBigPreview(){ bigRunning = false; }
 
 function setSkin(idx){
   selectedSkinIndex = (idx + SKINS.length) % SKINS.length;
-  skinSelectName.textContent = SKINS[selectedSkinIndex].name;
+  const s = SKINS[selectedSkinIndex];
+  skinTierEl.textContent = SKIN_TIER_LABEL[s.tier] + (s.animated ? ' · ANIMATED' : '');
+  skinTierEl.style.color = SKIN_TIER_COLOR[s.tier];
   skinSelectIndex.textContent = (selectedSkinIndex+1) + ' / ' + SKINS.length;
+  skinMsg.textContent = '';
+  refreshSkinAction();
 }
-setSkin(0);
+/** The main button of the skin screen: use it, buy it, or sign in to buy it. */
+function refreshSkinAction(){
+  const i = selectedSkinIndex, s = SKINS[i];
+  skinActionBtn.disabled = false;
+  if(skinOwned(i)){
+    skinPriceNote.textContent = s.tier === 'common' ? 'Free' : 'Owned';
+    if(i === equippedSkinIndex){ skinActionBtn.textContent = 'In use'; skinActionBtn.disabled = true; }
+    else skinActionBtn.textContent = 'Use this snake';
+  } else {
+    const p = skinPrices[s.tier];
+    skinPriceNote.textContent = solPrice(p) + ' · cosmetic only';
+    skinActionBtn.textContent = SOL.connected ? 'Buy for ' + solPrice(p) : 'Connect wallet to buy';
+  }
+}
+skinActionBtn.addEventListener('click', async ()=>{
+  const i = selectedSkinIndex;
+  skinMsg.textContent = '';
+  if(skinOwned(i)){ equipSkin(i); refreshSkinAction(); return; }
+  if(!SOL.connected){ await solConnect(); refreshSkinAction(); return; }
+  const price = skinPrices[SKINS[i].tier];
+  if(SOL.sol + 1e-9 < price){ skinMsg.textContent = 'Not enough balance. Deposit SOL first (you have ' + solPrice(SOL.sol) + ').'; return; }
+  if(!confirm('Buy this skin for ' + solPrice(price) + ' from your balance?')) return;
+  skinActionBtn.disabled = true; skinActionBtn.textContent = 'Buying…';
+  try{
+    const r = await solApi('/api/buy-skin', { method: 'POST', body: JSON.stringify({ skin: i }) });
+    ownedSkins = new Set(r.owned);
+    solApplyBalance(r);
+    equipSkin(i);
+    skinMsg.textContent = 'Unlocked. It is now your snake.';
+  }catch(e){
+    if(e.status === 401) solReset('Session expired — reconnect your wallet.');
+    skinMsg.textContent = e.message;
+  }
+  refreshSkinAction();
+});
+setSkin(equippedSkinIndex);
 document.getElementById('skinSelPrev').addEventListener('click', ()=> setSkin(selectedSkinIndex-1));
 document.getElementById('skinSelNext').addEventListener('click', ()=> setSkin(selectedSkinIndex+1));
 
@@ -2202,7 +2327,7 @@ async function startGame(){
   playBtn.disabled = true;
   playBtn.textContent = 'Connecting...';
   try{
-    await connectAndJoin(name, buyin, selectedSkinIndex);
+    await connectAndJoin(name, buyin, usableSkin());
   }catch(err){
     playBtn.disabled = false;
     playBtn.textContent = 'Buy In & Play';
@@ -2453,6 +2578,7 @@ function solPollLoop(){
 function solReset(message){
   SOL.connected = false; SOL.playerId = null; SOL.publicKey = null; SOL.known = false;
   SOL.sol = 0; SOL.credits = 0;
+  ownedSkins = new Set(); refreshSkinAction(); // bought skins belong to the wallet that is no longer signed in
   clearTimeout(SOL.pollTimer); SOL.pollTimer = null; SOL.watchUntil = 0;
   depositModal.classList.add('hidden');
   withdrawModal.classList.add('hidden');
@@ -2491,6 +2617,7 @@ async function solConnect(){
     solApplyBalance(login);
     SOL.watchUntil = 0;
     solPollLoop();
+    solLoadSkins();
   }catch(e){
     const rejected = e && (e.code === 4001 || /reject|denied|cancel/i.test(e.message || ''));
     solReset(rejected ? 'Connection cancelled in Phantom.' : ('Could not connect: ' + (e.message || 'unknown error')));
@@ -2498,6 +2625,17 @@ async function solConnect(){
     solConnectBtn.disabled = false;
     solConnectBtn.textContent = 'Connect Phantom';
   }
+}
+
+/** Which paid skins this wallet owns, and the current prices. */
+async function solLoadSkins(){
+  try{
+    const r = await solApi('/api/skins');
+    ownedSkins = new Set(r.owned || []);
+    if(r.prices) skinPrices = r.prices;
+  }catch(e){ /* the shop just shows everything as locked until the next sign-in */ }
+  if(!skinOwned(equippedSkinIndex)) equipSkin(0);
+  setSkin(selectedSkinIndex);
 }
 
 async function solDisconnect(){
@@ -2629,7 +2767,7 @@ function solInit(){
   solApplyNetwork();
   solUpdateUI();
   // Learn the network up front so the menu never says "Devnet" on a real-money server.
-  fetch('/api/config').then(r => r.json()).then(c => { SOL.walletOn = !!c.enabled; if(c.creditsPerSol) SOL.rate = c.creditsPerSol; solApplyNetwork(c.network); solUpdateUI(); }).catch(()=>{});
+  fetch('/api/config').then(r => r.json()).then(c => { SOL.walletOn = !!c.enabled; if(c.skinPrices) skinPrices = c.skinPrices; if(c.creditsPerSol) SOL.rate = c.creditsPerSol; solApplyNetwork(c.network); solUpdateUI(); }).catch(()=>{});
 }
 
 /* ============================== LOADING SCREEN ============================== */
