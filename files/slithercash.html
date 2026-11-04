@@ -289,6 +289,14 @@
   .result-card.tilting::after{ opacity:1; }
   @keyframes cardFloat{ 0%,100%{ transform:translateY(0) rotateX(0deg) rotateY(0deg); } 50%{ transform:translateY(-6px) rotateX(1.6deg) rotateY(-2.2deg); } }
   @media (prefers-reduced-motion: reduce){ .result-float{ animation:none; } .result-card{ transition:none; } }
+  .result-discord{ margin-top:26px; display:inline-flex; align-items:center; gap:10px; padding:11px 20px; border-radius:999px; cursor:pointer;
+    color:#d6dbff; background:rgba(88,101,242,0.16); border:1px solid rgba(88,101,242,0.55); font:600 14px 'Space Grotesk',sans-serif;
+    transition:background .2s ease, transform .15s ease; }
+  .result-discord[hidden]{ display:none; }
+  .result-discord:hover:not(:disabled){ background:rgba(88,101,242,0.28); transform:translateY(-1px); }
+  .result-discord:disabled{ cursor:default; opacity:0.8; }
+  .result-discord svg{ width:20px; height:20px; fill:currentColor; }
+  .result-discord + .result-back{ margin-top:12px; }
   .result-back{ margin-top:30px; padding:10px 16px; background:none; border:none; cursor:pointer; color:var(--white-muted); font:600 16px 'Space Grotesk',sans-serif; }
   .result-back:hover{ color:var(--gold-bright); }
   #deathStats, #cashoutStats{ font-family:'JetBrains Mono',monospace; margin-top:16px; }
@@ -562,6 +570,7 @@
 <div id="cashoutScreen" class="overlay hidden">
   <div class="result-wrap">
     <div class="result-stage" id="winStage"><div class="result-float"><div class="result-card" id="winCardEl"></div></div></div>
+    <button class="result-discord" id="postWinBtn" hidden><span id="postWinLabel">Post to Discord</span></button>
     <button class="result-back" id="cashoutMenuBtn">&#8592; Back to Main Menu</button>
   </div>
 </div>
@@ -2208,6 +2217,33 @@ function initCardTilt(stage){
 initCardTilt(document.getElementById('winStage'));
 initCardTilt(document.getElementById('deathStage'));
 
+/* "Post to Discord": the server posts this exact win (from its own record of the cash-out) to the #wins channel.
+   The page only holds an id for the win, so it cannot post anything made up. */
+const postWinBtn = document.getElementById('postWinBtn');
+const postWinLabel = document.getElementById('postWinLabel');
+let currentWinId = null;
+const discordIcon = document.querySelector('.social-links a[aria-label*="Discord"] svg');
+if(discordIcon) postWinBtn.insertBefore(discordIcon.cloneNode(true), postWinBtn.firstChild);
+function setupPostWin(winId){
+  currentWinId = winId || null;
+  postWinBtn.hidden = !(SOL.winsOn && currentWinId);
+  postWinBtn.disabled = false;
+  postWinLabel.textContent = 'Post to Discord';
+}
+postWinBtn.addEventListener('click', async ()=>{
+  if(!currentWinId) return;
+  postWinBtn.disabled = true; postWinLabel.textContent = 'Posting…';
+  try{
+    await solApi('/api/post-win', { method: 'POST', body: JSON.stringify({ winId: currentWinId }) });
+    currentWinId = null;
+    postWinLabel.textContent = 'Posted to #wins ✓';
+  }catch(e){
+    postWinLabel.textContent = e.message;
+    const retry = !e.status || e.status >= 500;     // a busy Discord can be tried again; the other answers are final
+    setTimeout(()=>{ if(retry){ postWinBtn.disabled = false; postWinLabel.textContent = 'Post to Discord'; } else postWinBtn.hidden = true; }, 3500);
+  }
+});
+
 function handleNetCashout(msg){
   running = false;
   if(!SOL.connected){ wallet += msg.amount; saveWallet(); } // wallet mode: the server already credited the balance
@@ -2220,6 +2256,7 @@ function handleNetCashout(msg){
     profit, pct: msg.buyin > 0 ? profit / msg.buyin * 100 : 0,
     invested: msg.buyin, position: received, sub: lastPlayerName ? '@' + lastPlayerName : '',
   });
+  setupPostWin(msg.winId);
 
   hud.classList.add('hud-hidden');
   leaderboardEl.classList.add('hud-hidden');
@@ -2731,7 +2768,7 @@ function solInit(){
   solApplyNetwork();
   solUpdateUI();
   // Learn the network up front so the menu never says "Devnet" on a real-money server.
-  fetch('/api/config').then(r => r.json()).then(c => { SOL.walletOn = !!c.enabled; if(c.skinPrices) skinPrices = c.skinPrices; if(c.creditsPerSol) SOL.rate = c.creditsPerSol; solApplyNetwork(c.network); solUpdateUI(); }).catch(()=>{});
+  fetch('/api/config').then(r => r.json()).then(c => { SOL.walletOn = !!c.enabled; if(c.skinPrices) skinPrices = c.skinPrices; SOL.winsOn = !!c.winsEnabled; if(c.creditsPerSol) SOL.rate = c.creditsPerSol; solApplyNetwork(c.network); solUpdateUI(); }).catch(()=>{});
 }
 
 /* ============================== LOADING SCREEN ============================== */

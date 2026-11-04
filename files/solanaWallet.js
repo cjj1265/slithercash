@@ -90,6 +90,7 @@ let spawnProtectSec = envSeconds('SPAWN_PROTECT_SECONDS', 3); // a new snake can
 // gameServer.js. Common skins are free for everyone; the others are bought once, with balance, and kept per wallet.
 const SKIN_TIERS = ['common', 'common', 'common', 'rare', 'rare', 'epic', 'epic', 'legendary', 'legendary'];
 const skinPriceSol = { rare: 0.03, epic: 0.08, legendary: 0.25 }; // admin settings change these
+let winPostMinSol = 0.001; // the smallest profit (SOL) that may be posted to the #wins channel
 
 // The only address house earnings can ever be sent to. It comes from the environment, never from a request,
 // so someone who got hold of the admin token still cannot redirect the money anywhere else.
@@ -231,6 +232,7 @@ const SETTING_DEFS = {
   cashoutHoldSec:    { label: 'Cash-out hold (seconds)',       min: 0,     max: 30,  get: () => cashoutHoldSec,                                     set: (v) => { cashoutHoldSec = v; } },
   minPlaySec:        { label: 'Play before cash-out (seconds)', min: 0,    max: 120, get: () => minPlaySec,                                         set: (v) => { minPlaySec = v; } },
   spawnProtectSec:   { label: 'Spawn protection (seconds)',    min: 0,     max: 10,  get: () => spawnProtectSec,                                    set: (v) => { spawnProtectSec = v; } },
+  winPostMinSol:      { label: 'Smallest win to post (SOL)',    min: 0,     max: 5,   get: () => winPostMinSol,                                      set: (v) => { winPostMinSol = v; } },
   skinPriceRare:      { label: 'Rare skin price (SOL)',         min: 0.001, max: 5,   get: () => skinPriceSol.rare,                                  set: (v) => { skinPriceSol.rare = v; } },
   skinPriceEpic:      { label: 'Epic skin price (SOL)',         min: 0.001, max: 5,   get: () => skinPriceSol.epic,                                  set: (v) => { skinPriceSol.epic = v; } },
   skinPriceLegendary: { label: 'Legendary skin price (SOL)',    min: 0.001, max: 10,  get: () => skinPriceSol.legendary,                             set: (v) => { skinPriceSol.legendary = v; } },
