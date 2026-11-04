@@ -3,7 +3,7 @@
  * Draws the "CASHED OUT" card as a PNG, on the server, from numbers the server itself recorded.
  *
  * This is the same drawing as the card on the page (slithercash.html: FACE_LAYERS), laid flat. If the look of
- * one changes, change the other. Fonts come from the @fontsource packages so the picture does not depend on
+ * one changes, change the other. Fonts come from the @fontsource/exo-2 package so the picture does not depend on
  * anything installed on the machine.
  *
  *   renderWinCard({ profit, pct, invested, position, name, sym })  ->  Buffer (PNG, 1100x640)
@@ -15,8 +15,8 @@ const { createCanvas, GlobalFonts } = require('@napi-rs/canvas');
 const FONTS = [
   ['@fontsource/exo-2', 'exo-2-latin-800-italic.woff2', 'Exo 2'],
   ['@fontsource/exo-2', 'exo-2-latin-900-italic.woff2', 'Exo 2'],
-  ['@fontsource/space-grotesk', 'space-grotesk-latin-500-normal.woff2', 'Space Grotesk'],
-  ['@fontsource/space-grotesk', 'space-grotesk-latin-700-normal.woff2', 'Space Grotesk'],
+  ['@fontsource/exo-2', 'exo-2-latin-500-normal.woff2', 'Exo 2'],
+  ['@fontsource/exo-2', 'exo-2-latin-700-normal.woff2', 'Exo 2'],
 ];
 let fontsReady = false;
 function loadFonts() {
@@ -26,7 +26,7 @@ function loadFonts() {
 }
 
 const GOLD = '#ffc928', RED = '#e6465c';
-const EXO = '"Exo 2", "Space Grotesk", sans-serif', SG = '"Space Grotesk", sans-serif';
+const EXO = '"Exo 2", sans-serif', SG = EXO; // one typeface: italic for display, upright for the stats
 const FACE_W = 1100, FACE_H = 640;
 
 /** An amount as sign, symbol and number, so the symbol can be drawn with room around it. */

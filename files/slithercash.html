@@ -9,9 +9,11 @@
 <meta name="theme-color" content="#0a0d0c">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Anton&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;800&family=Exo+2:ital,wght@1,800;1,900&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Exo+2:ital,wght@0,400;0,500;0,600;0,700;0,800;1,500;1,600;1,700;1,800;1,900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <style>
   :root{
+    --font:'Exo 2', system-ui, sans-serif;
+    --mono:'JetBrains Mono', ui-monospace, monospace;
     --bg-void:#0a0d0c;
     --charcoal:#12181a;
     --charcoal-2:#1a2224;
@@ -32,7 +34,7 @@
   *{box-sizing:border-box; margin:0; padding:0;}
   html,body{
     width:100%; height:100%; overflow:hidden; background:var(--bg-void);
-    font-family:'Space Grotesk',sans-serif; color:var(--white-muted);
+    font-family:var(--font); color:var(--white-muted);
     -webkit-user-select:none; user-select:none;
   }
   #menuBgCanvas{ position:fixed; inset:0; z-index:1; pointer-events:none; }
@@ -60,7 +62,7 @@
   .coin-badge svg{ width:16px; height:16px; }
   #cashValueWrap{ display:flex; flex-direction:column; line-height:1.15; }
   #cashCounter{
-    font-family:'JetBrains Mono',monospace; font-weight:800; font-size:22px;
+    font-family:var(--font); font-variant-numeric:tabular-nums; font-weight:800; font-size:22px;
     color:var(--gold-bright); text-shadow:0 1px 3px rgba(0,0,0,0.6);
     letter-spacing:0.3px;
   }
@@ -75,12 +77,12 @@
     box-shadow:0 10px 26px rgba(0,0,0,0.3);
   }
   #leaderboard h3{
-    font-family:'Space Grotesk',sans-serif; font-size:10.5px; letter-spacing:2px; color:var(--dim);
+    font-family:var(--font); font-size:10.5px; letter-spacing:2px; color:var(--dim);
     text-transform:uppercase; margin-bottom:6px; text-align:center; font-weight:600;
     display:flex; align-items:center; justify-content:center; gap:5px;
   }
   #leaderboard h3 svg{ width:11px; height:11px; opacity:0.8; }
-  #lbList{ list-style:none; font-family:'JetBrains Mono',monospace; font-size:11.5px; }
+  #lbList{ list-style:none; font-family:var(--font); font-variant-numeric:tabular-nums; font-size:11.5px; }
   #lbList li{
     display:flex; align-items:center; justify-content:space-between; padding:5px 12px;
     color:var(--gray); border-left:3px solid transparent;
@@ -115,13 +117,13 @@
     width:82px; height:82px; margin:0 auto 14px; border-radius:50%;
     background: radial-gradient(circle at 35% 30%, var(--gold-bright), var(--gold) 55%, var(--gold-deep) 100%);
     display:flex; align-items:center; justify-content:center;
-    font-family:'Anton',sans-serif; font-size:36px; color:#241a08;
+    font-family:var(--font); font-style:italic; font-weight:900; font-size:36px; color:#241a08;
     box-shadow:0 0 0 6px rgba(240,194,74,0.08), 0 12px 26px rgba(0,0,0,0.5);
     position:relative;
   }
   .chip::before{ content:""; position:absolute; inset:7px; border-radius:50%; border:2px dashed rgba(36,26,8,0.3); }
   .title{
-    font-family:'Anton',sans-serif; font-size:38px; letter-spacing:2.5px;
+    font-family:var(--font); font-style:italic; font-weight:900; font-size:38px; letter-spacing:2.5px;
     color:var(--gold-bright); text-shadow:0 2px 10px rgba(0,0,0,0.55);
     line-height:1; text-transform:uppercase;
   }
@@ -130,7 +132,7 @@
 
   #nameInput{
     margin-top:6px; width:100%; padding:13px 16px; font-size:15px;
-    font-family:'Space Grotesk',sans-serif; font-weight:500; text-align:center; letter-spacing:0.4px;
+    font-family:var(--font); font-weight:500; text-align:center; letter-spacing:0.4px;
     background:rgba(255,255,255,0.04); border:1px solid var(--hairline);
     border-radius:10px; color:var(--white-muted); outline:none;
     transition:border-color .2s ease, box-shadow .2s ease;
@@ -141,7 +143,7 @@
   /* ---------- Buttons: distinct identities ---------- */
   .btn{
     margin-top:14px; width:100%; padding:14px 16px; border:none; border-radius:12px;
-    font-family:'Space Grotesk',sans-serif; font-size:15px; font-weight:700; letter-spacing:0.3px;
+    font-family:var(--font); font-size:15px; font-weight:700; letter-spacing:0.3px;
     cursor:pointer; position:relative; overflow:hidden;
     transition:transform .2s cubic-bezier(.2,.8,.2,1), box-shadow .2s ease, filter .15s ease;
   }
@@ -171,9 +173,9 @@
     transition:border-color .2s ease, box-shadow .2s ease;
   }
   .buyin-field:focus-within{ border-color:rgba(240,194,74,0.5); box-shadow:0 0 0 3px rgba(240,194,74,0.1); }
-  .buyin-sym{ color:var(--gold); font-family:'JetBrains Mono',monospace; font-weight:800; font-size:17px; }
+  .buyin-sym{ color:var(--gold); font-family:var(--font); font-variant-numeric:tabular-nums; font-weight:800; font-size:17px; }
   #buyinInput{
-    flex:1; width:100%; padding:13px 12px; font-size:17px; font-family:'JetBrains Mono',monospace; font-weight:700;
+    flex:1; width:100%; padding:13px 12px; font-size:17px; font-family:var(--font); font-variant-numeric:tabular-nums; font-weight:700;
     background:transparent; border:none; outline:none; color:var(--gold-bright);
     -moz-appearance:textfield; appearance:textfield;
   }
@@ -186,15 +188,15 @@
   }
   .wallet-top{ display:flex; align-items:center; justify-content:space-between; }
   .wallet-label{ font-size:10.5px; letter-spacing:1.8px; text-transform:uppercase; color:var(--dim); font-weight:600; }
-  #walletAmount{ font-family:'JetBrains Mono',monospace; font-weight:800; font-size:20px; color:var(--gold-bright); text-shadow:0 1px 2px rgba(0,0,0,0.5); }
+  #walletAmount{ font-family:var(--font); font-variant-numeric:tabular-nums; font-weight:800; font-size:20px; color:var(--gold-bright); text-shadow:0 1px 2px rgba(0,0,0,0.5); }
   .wallet-sub{ margin-top:2px; font-size:10px; color:var(--dim); }
   .wallet-withdraw{
     margin-top:10px; width:100%; padding:8px; border-radius:8px; border:1px solid rgba(255,255,255,0.08);
-    background:transparent; color:var(--dim); font-family:'Space Grotesk',sans-serif;
+    background:transparent; color:var(--dim); font-family:var(--font);
     font-size:10.5px; letter-spacing:0.6px; cursor:not-allowed;
   }
   .wallet-history{ margin-top:10px; border-top:1px solid var(--hairline); padding-top:8px; }
-  .wallet-hist-row{ display:flex; justify-content:space-between; font-family:'JetBrains Mono',monospace; font-size:10.5px; color:var(--dim); padding:2px 0; }
+  .wallet-hist-row{ display:flex; justify-content:space-between; font-family:var(--font); font-variant-numeric:tabular-nums; font-size:10.5px; color:var(--dim); padding:2px 0; }
   .wallet-hist-row .pos{ color:#6fcf97; }
   .wallet-hist-row .neg{ color:var(--ruby); }
   .wallet-empty{ font-size:10.5px; color:var(--dim); text-align:center; padding:4px 0; }
@@ -214,14 +216,14 @@
 
   /* ---------- Skin select full page ---------- */
   #skinSelectScreen .panel{ max-width:370px; }
-  .skin-select-title{ font-family:'Anton',sans-serif; font-size:18px; letter-spacing:2px; text-transform:uppercase; color:var(--gold-bright); margin-bottom:16px; }
+  .skin-select-title{ font-family:var(--font); font-style:italic; font-weight:900; font-size:18px; letter-spacing:2px; text-transform:uppercase; color:var(--gold-bright); margin-bottom:16px; }
   #skinSelectPreview{
     width:310px; max-width:78vw; height:132px; border-radius:16px;
     background:radial-gradient(ellipse at center, rgba(18,74,51,0.35), rgba(5,8,6,0.9));
     border:1px solid var(--hairline); box-shadow:inset 0 0 30px rgba(0,0,0,0.4);
   }
-  .skin-tier{ margin-top:14px; font-family:'Space Grotesk',sans-serif; font-size:15px; font-weight:700; letter-spacing:2px; }
-  .skin-price{ margin-top:4px; font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--white-muted); }
+  .skin-tier{ margin-top:14px; font-family:var(--font); font-size:15px; font-weight:700; letter-spacing:2px; }
+  .skin-price{ margin-top:4px; font-family:var(--font); font-variant-numeric:tabular-nums; font-size:13px; color:var(--white-muted); }
   .skin-msg{ min-height:16px; margin-top:8px; font-size:12px; color:var(--dim); }
   .skin-index{ margin-top:3px; font-size:10.5px; color:var(--dim); letter-spacing:1px; }
   .skin-side-arrow{
@@ -241,7 +243,7 @@
   #cashOutBtn{
     display:flex; align-items:center; gap:8px; padding:12px 20px 12px 10px; border:none; border-radius:999px;
     background:linear-gradient(180deg, var(--gold-bright), var(--gold));
-    color:#241a08; font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:13px;
+    color:#241a08; font-family:var(--font); font-weight:700; font-size:13px;
     letter-spacing:0.3px; cursor:pointer; position:relative; overflow:hidden;
     box-shadow:0 5px 0 var(--gold-deep), 0 12px 22px rgba(0,0,0,0.4);
     transition:transform .18s cubic-bezier(.2,.8,.2,1), box-shadow .2s ease;
@@ -258,7 +260,7 @@
   #cashOutBtn:active{ transform:translateY(3px); box-shadow:0 1px 0 var(--gold-deep), 0 4px 10px rgba(0,0,0,0.4); }
   #cashOutBtn .co-icon{
     width:20px; height:20px; border-radius:50%; background:#241a08; color:var(--gold-bright);
-    display:flex; align-items:center; justify-content:center; font-family:'JetBrains Mono',monospace; font-size:12px; font-weight:800; flex-shrink:0;
+    display:flex; align-items:center; justify-content:center; font-family:var(--font); font-variant-numeric:tabular-nums; font-size:12px; font-weight:800; flex-shrink:0;
   }
   #cashOutBtn{ touch-action:none; user-select:none; -webkit-user-select:none; --hold:0%; }
   #cashOutBtn.locked{ opacity:0.55; cursor:not-allowed; animation:none; }
@@ -290,18 +292,18 @@
   @keyframes cardFloat{ 0%,100%{ transform:translateY(0) rotateX(0deg) rotateY(0deg); } 50%{ transform:translateY(-6px) rotateX(1.6deg) rotateY(-2.2deg); } }
   @media (prefers-reduced-motion: reduce){ .result-float{ animation:none; } .result-card{ transition:none; } }
   .result-discord{ margin-top:26px; display:inline-flex; align-items:center; gap:10px; padding:11px 20px; border-radius:999px; cursor:pointer;
-    color:#d6dbff; background:rgba(88,101,242,0.16); border:1px solid rgba(88,101,242,0.55); font:600 14px 'Space Grotesk',sans-serif;
+    color:#d6dbff; background:rgba(88,101,242,0.16); border:1px solid rgba(88,101,242,0.55); font:600 14px var(--font);
     transition:background .2s ease, transform .15s ease; }
   .result-discord[hidden]{ display:none; }
   .result-discord:hover:not(:disabled){ background:rgba(88,101,242,0.28); transform:translateY(-1px); }
   .result-discord:disabled{ cursor:default; opacity:0.8; }
   .result-discord svg{ width:20px; height:20px; fill:currentColor; }
   .result-discord + .result-back{ margin-top:12px; }
-  .result-back{ margin-top:30px; padding:10px 16px; background:none; border:none; cursor:pointer; color:var(--white-muted); font:600 16px 'Space Grotesk',sans-serif; }
+  .result-back{ margin-top:30px; padding:10px 16px; background:none; border:none; cursor:pointer; color:var(--white-muted); font:600 16px var(--font); }
   .result-back:hover{ color:var(--gold-bright); }
-  #deathStats, #cashoutStats{ font-family:'JetBrains Mono',monospace; margin-top:16px; }
+  #deathStats, #cashoutStats{ font-family:var(--font); font-variant-numeric:tabular-nums; margin-top:16px; }
   #deathStats .row, #cashoutStats .row{ display:flex; justify-content:space-between; align-items:center; padding:8px 4px; border-bottom:1px solid var(--hairline); font-size:13px; }
-  #deathStats .row span:first-child, #cashoutStats .row span:first-child{ color:var(--dim); font-family:'Space Grotesk',sans-serif; font-weight:500; font-size:12.5px; }
+  #deathStats .row span:first-child, #cashoutStats .row span:first-child{ color:var(--dim); font-family:var(--font); font-weight:500; font-size:12.5px; }
   #deathStats .row span:last-child, #cashoutStats .row span:last-child{ color:var(--gold-bright); font-weight:800; }
   .killLine{ margin-top:10px; color:var(--ruby); font-size:12px; letter-spacing:0.4px; }
 
@@ -311,7 +313,7 @@
     background:radial-gradient(circle at 35% 30%, var(--gold-bright), var(--gold) 70%);
     box-shadow:0 0 0 6px rgba(240,194,74,0.1), 0 12px 24px rgba(0,0,0,0.45);
     display:none; flex-direction:column; align-items:center; justify-content:center; gap:2px;
-    font-family:'Space Grotesk',sans-serif; font-size:10px; font-weight:700; color:#241a08; letter-spacing:0.8px;
+    font-family:var(--font); font-size:10px; font-weight:700; color:#241a08; letter-spacing:0.8px;
     z-index:8; touch-action:none; transition:transform .15s ease;
   }
   #boostBtn svg{ width:20px; height:20px; }
@@ -326,14 +328,14 @@
     opacity:1; transition:opacity 0.8s ease;
   }
   #loadingScreen.hidden{ opacity:0; pointer-events:none; }
-  .loading-logo{ font-family:'Anton',sans-serif; font-size:32px; letter-spacing:3px; color:var(--gold-bright); text-shadow:0 0 18px rgba(240,194,74,0.4); text-transform:uppercase; }
+  .loading-logo{ font-family:var(--font); font-style:italic; font-weight:900; font-size:32px; letter-spacing:3px; color:var(--gold-bright); text-shadow:0 0 18px rgba(240,194,74,0.4); text-transform:uppercase; }
   .loading-logo span{ color:var(--white-muted); }
   .loading-bar-track{ margin-top:28px; width:250px; max-width:70vw; height:7px; border-radius:999px; background:rgba(255,255,255,0.06); overflow:hidden; box-shadow:inset 0 0 4px rgba(0,0,0,0.6); }
   .loading-bar-fill{ height:100%; width:0%; border-radius:999px; background:linear-gradient(90deg,#f0c24a,#ffe27a); box-shadow:0 0 14px 2px rgba(240,194,74,0.8), 0 0 28px 6px rgba(240,194,74,0.3); }
   .loading-tip{ margin-top:20px; font-size:12px; color:var(--dim); max-width:290px; text-align:center; letter-spacing:0.2px; line-height:1.6; min-height:32px; padding:0 12px; }
 
   /* ---------- Brand mark (menu only) ---------- */
-  .brand-mark{ position:absolute; top:24px; left:28px; font-family:'Anton',sans-serif; font-size:14px; letter-spacing:2px; color:var(--gold-bright); text-transform:uppercase; opacity:0; }
+  .brand-mark{ position:absolute; top:24px; left:28px; font-family:var(--font); font-style:italic; font-weight:900; font-size:14px; letter-spacing:2px; color:var(--gold-bright); text-transform:uppercase; opacity:0; }
   .brand-mark span{ color:var(--dim); }
   .social-links{ position:absolute; right:24px; bottom:24px; display:flex; gap:10px; }
   .social-links a{ width:42px; height:42px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:var(--white-muted);
@@ -341,7 +343,7 @@
   .social-links a:hover{ color:var(--gold-bright); border-color:var(--gold-bright); transform:translateY(-2px); }
   .social-links svg{ width:20px; height:20px; fill:currentColor; }
   .online-pill{ position:absolute; top:17px; left:138px; display:flex; align-items:center; gap:8px; padding:7px 16px; border-radius:999px;
-    background:rgba(255,255,255,0.05); border:1px solid var(--hairline); font-family:'JetBrains Mono',monospace; font-size:12.5px; color:var(--white-muted); white-space:nowrap; }
+    background:rgba(255,255,255,0.05); border:1px solid var(--hairline); font-family:var(--font); font-variant-numeric:tabular-nums; font-size:12.5px; color:var(--white-muted); white-space:nowrap; }
   .online-pill b{ color:var(--gold-bright); font-weight:800; }
   .online-pill i{ width:8px; height:8px; border-radius:50%; background:#43d17a; box-shadow:0 0 8px rgba(67,209,122,0.8); }
 
@@ -368,7 +370,7 @@
     margin-top:10px; width:100%; padding:10px; border-radius:10px;
     border:1px solid rgba(171,159,242,0.45); color:#d9d3ff;
     background:linear-gradient(180deg, rgba(171,159,242,0.22), rgba(171,159,242,0.10));
-    font-family:'Space Grotesk',sans-serif; font-size:12.5px; font-weight:700; letter-spacing:0.4px; cursor:pointer;
+    font-family:var(--font); font-size:12.5px; font-weight:700; letter-spacing:0.4px; cursor:pointer;
     transition:transform .15s cubic-bezier(.2,.8,.2,1), border-color .2s ease, box-shadow .2s ease;
   }
   .sol-connect-btn:hover{ transform:translateY(-1px); border-color:rgba(171,159,242,0.8); box-shadow:0 0 16px rgba(171,159,242,0.25); }
@@ -378,20 +380,20 @@
   .sol-panel{ margin-top:10px; border-top:1px solid var(--hairline); padding-top:10px; }
   .sol-row{ display:flex; justify-content:space-between; align-items:baseline; padding:2px 0; }
   .sol-key{ font-size:10.5px; letter-spacing:1.2px; text-transform:uppercase; color:var(--dim); font-weight:600; }
-  .sol-val{ font-family:'JetBrains Mono',monospace; font-weight:800; font-size:13.5px; color:var(--white-muted); }
+  .sol-val{ font-family:var(--font); font-variant-numeric:tabular-nums; font-weight:800; font-size:13.5px; color:var(--white-muted); }
   .sol-val.usd{ color:var(--gold-bright); }
-  .sol-addr{ margin-top:4px; font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--dim); text-align:right; }
+  .sol-addr{ margin-top:4px; font-family:var(--mono); font-size:10px; color:var(--dim); text-align:right; }
   .sol-actions{ display:flex; gap:8px; margin-top:10px; }
   .sol-actions button{
     flex:1; padding:9px 8px; border-radius:9px; border:1px solid rgba(255,255,255,0.1);
     background:rgba(255,255,255,0.05); color:var(--white-muted); cursor:pointer;
-    font-family:'Space Grotesk',sans-serif; font-size:12px; font-weight:700; letter-spacing:0.3px;
+    font-family:var(--font); font-size:12px; font-weight:700; letter-spacing:0.3px;
     transition:transform .15s ease, background .2s ease, border-color .2s ease;
   }
   .sol-actions button:hover{ transform:translateY(-1px); background:rgba(255,255,255,0.09); border-color:rgba(240,194,74,0.35); }
   .sol-link{
     display:block; margin:8px auto 0; background:none; border:none; cursor:pointer;
-    font-family:'Space Grotesk',sans-serif; font-size:10.5px; color:var(--dim); text-decoration:underline;
+    font-family:var(--font); font-size:10.5px; color:var(--dim); text-decoration:underline;
   }
 
   .sol-modal{
@@ -409,12 +411,12 @@
     color:var(--dim); font-size:22px; cursor:pointer; line-height:1;
   }
   .sol-x:hover{ color:var(--white-muted); }
-  .sol-title{ font-family:'Anton',sans-serif; font-size:20px; letter-spacing:2px; text-transform:uppercase; color:var(--gold-bright); }
+  .sol-title{ font-family:var(--font); font-style:italic; font-weight:900; font-size:20px; letter-spacing:2px; text-transform:uppercase; color:var(--gold-bright); }
   .sol-sub{ margin-top:6px; font-size:11px; color:var(--dim); letter-spacing:0.3px; line-height:1.5; }
   #depositQr{ display:block; margin:14px auto 0; width:200px; height:200px; border-radius:12px; background:#fff; padding:8px; }
   .sol-addrbox{
     margin-top:12px; padding:10px 12px; border-radius:10px; background:rgba(255,255,255,0.04); border:1px solid var(--hairline);
-    font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--white-muted); word-break:break-all;
+    font-family:var(--mono); font-size:11px; color:var(--white-muted); word-break:break-all;
     -webkit-user-select:text; user-select:text;
   }
   .sol-hint{ margin-top:10px; font-size:10.5px; color:var(--dim); line-height:1.55; }
@@ -424,7 +426,7 @@
   }
   .sol-field:focus-within{ border-color:rgba(240,194,74,0.5); box-shadow:0 0 0 3px rgba(240,194,74,0.1); }
   #withdrawAmount{
-    flex:1; min-width:0; padding:12px 8px; font-size:16px; font-family:'JetBrains Mono',monospace; font-weight:700;
+    flex:1; min-width:0; padding:12px 8px; font-size:16px; font-family:var(--font); font-variant-numeric:tabular-nums; font-weight:700;
     background:transparent; border:none; outline:none; color:var(--gold-bright);
     -moz-appearance:textfield; appearance:textfield;
   }
@@ -432,10 +434,10 @@
   .sol-unit{ font-size:11px; color:var(--dim); font-weight:600; padding-right:6px; }
   .sol-max{
     border:none; border-radius:7px; padding:6px 10px; cursor:pointer; background:rgba(240,194,74,0.14); color:var(--gold-bright);
-    font-family:'Space Grotesk',sans-serif; font-size:10.5px; font-weight:700; letter-spacing:0.6px;
+    font-family:var(--font); font-size:10.5px; font-weight:700; letter-spacing:0.6px;
   }
   .sol-avail{ margin-top:8px; display:flex; justify-content:space-between; font-size:11px; color:var(--dim); }
-  .sol-avail b{ font-family:'JetBrains Mono',monospace; color:var(--white-muted); font-weight:700; }
+  .sol-avail b{ font-family:var(--font); font-variant-numeric:tabular-nums; color:var(--white-muted); font-weight:700; }
   .sol-status{ margin-top:10px; min-height:16px; font-size:11px; line-height:1.5; color:var(--dim); word-break:break-word; }
   .sol-status.err{ color:var(--ruby); }
   .sol-status.ok{ color:#6fcf97; }
@@ -444,10 +446,24 @@
   #solToast{
     position:fixed; left:50%; bottom:28px; z-index:60; max-width:90vw; padding:10px 18px; border-radius:999px;
     background:rgba(18,24,26,0.96); border:1px solid rgba(240,194,74,0.45); color:var(--gold-bright);
-    font-family:'JetBrains Mono',monospace; font-size:12.5px; font-weight:700; box-shadow:0 10px 26px rgba(0,0,0,0.5);
+    font-family:var(--font); font-variant-numeric:tabular-nums; font-size:12.5px; font-weight:700; box-shadow:0 10px 26px rgba(0,0,0,0.5);
     opacity:0; transform:translate(-50%, 12px); pointer-events:none; transition:opacity .25s ease, transform .25s ease;
   }
   #solToast.show{ opacity:1; transform:translate(-50%, 0); }
+  /* ---------- One typeface: Exo 2. Italic for display and buttons, upright for reading ---------- */
+  html, body{ font-variant-numeric:tabular-nums; -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
+  button, input, select, textarea{ font-family:inherit; }
+  .btn, .sol-connect-btn, .sol-actions button{ font-style:italic; font-weight:800; letter-spacing:0.5px; }
+  .title, .sol-title, .skin-select-title{ letter-spacing:1px; }
+  .loading-logo, .brand-mark{ text-transform:none; letter-spacing:0; color:#f4f4f4; text-shadow:0 0 16px rgba(255,255,255,0.2); }
+  .loading-logo{ font-size:44px; }
+  .loading-logo span, .brand-mark span{ color:var(--gold); text-shadow:0 0 16px rgba(240,194,74,0.45); }
+  .brand-mark{ font-size:20px; }
+  .online-pill{ left:172px; }
+  .result-back, .result-discord{ font-style:italic; font-weight:700; }
+  .buyin-label, .sol-key, #lbList li .rk{ font-weight:700; }
+  .tagline, .hint, .sol-note, .wallet-sub{ font-weight:500; letter-spacing:0.3px; }
+  #lbList .name{ font-weight:600; }
 </style>
 </head>
 <body>
@@ -488,14 +504,14 @@
 
 <!-- Loading screen -->
 <div id="loadingScreen">
-  <div class="loading-logo">SNAKE<span>PAY</span></div>
+  <div class="loading-logo">snakepay<span>.lol</span></div>
   <div class="loading-bar-track"><div class="loading-bar-fill" id="loadingBarFill"></div></div>
   <div class="loading-tip" id="loadingTip"></div>
 </div>
 
 <!-- Start screen -->
 <div id="startScreen" class="overlay hidden">
-  <div class="brand-mark">Snake<span>Pay</span></div>
+  <div class="brand-mark">snakepay<span>.lol</span></div>
   <div class="social-links">
     <a href="https://www.tiktok.com/@snakepay.lol" target="_blank" rel="noopener noreferrer" aria-label="SnakePay on TikTok" title="TikTok">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z"/></svg>
@@ -601,7 +617,7 @@
   <div class="sol-box">
     <button type="button" class="sol-x" data-sol-close aria-label="Close">&times;</button>
     <div class="sol-title">Withdraw SOL</div>
-    <div class="sol-sub">Sent to your connected wallet<br><span id="withdrawDest" style="font-family:'JetBrains Mono',monospace;"></span></div>
+    <div class="sol-sub">Sent to your connected wallet<br><span id="withdrawDest" style="font-family:var(--mono);"></span></div>
     <div class="sol-field">
       <input id="withdrawAmount" type="number" min="0.001" step="0.001" placeholder="0.00" inputmode="decimal">
       <span class="sol-unit">SOL</span>
@@ -1479,7 +1495,7 @@ function drawSnakeBody(snake){
   }
 
   if(r>4){
-    ctx.font = "500 12px 'Space Grotesk', sans-serif";
+    ctx.font = "700 12px 'Exo 2', sans-serif";
     ctx.fillStyle = 'rgba(234,238,233,0.88)';
     ctx.textAlign = 'center';
     ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 3;
@@ -2064,7 +2080,7 @@ function drawAmount(c, p, x, baseY, font, size, color, align){
 
 
 const GOLD = '#ffc928', RED = '#e6465c';
-const EXO = '"Exo 2", "Space Grotesk", sans-serif', SG = '"Space Grotesk", sans-serif';
+const EXO = '"Exo 2", sans-serif', SG = EXO; // one typeface everywhere: italic for display, upright for the stats
 const FACE_W = 1100, FACE_H = 640; // the card is drawn at this size and scaled to fit the screen
 
 /* The result card is a stack of transparent canvases, one per part (wordmark, title, amount bar, stats, name).
@@ -2190,7 +2206,7 @@ function showResultCard(kind, data){
   if(document.fonts && document.fonts.load){
     Promise.all([
       document.fonts.load('italic 900 100px "Exo 2"'), document.fonts.load('italic 800 100px "Exo 2"'),
-      document.fonts.load('500 40px "Space Grotesk"'), document.fonts.load('700 40px "Space Grotesk"'),
+      document.fonts.load('500 40px "Exo 2"'), document.fonts.load('700 40px "Exo 2"'),
     ]).then(() => { if(resultCards[kind] === d) paint(); }).catch(()=>{});
   }
 }
