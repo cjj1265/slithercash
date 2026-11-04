@@ -37,7 +37,14 @@ const near = (a, b, eps) => Math.abs(a - b) < (eps || 1e-9);
 
 // ---- webhook receiver (stands in for Discord/Slack) ----
 const alerts = [];
+const winPosts = []; // what the #wins webhook received: { ct, body } with the raw bytes of the upload
 const hook = http.createServer((req, res) => {
+  if (req.url.startsWith('/wins')) {
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => { winPosts.push({ ct: req.headers['content-type'] || '', body: Buffer.concat(chunks) }); res.writeHead(204); res.end(); });
+    return;
+  }
   let body = '';
   req.on('data', (c) => { body += c; });
   req.on('end', () => { try { alerts.push(JSON.parse(body).content); } catch (e) {} res.writeHead(204); res.end(); });
@@ -445,6 +452,8 @@ const errOf = (state) => (state.msgs.find((m) => m.t === 'error') || {}).message
   const fin = (await admin('GET', '/admin/api/status')).json;
   check('still solvent after all of that, surplus unchanged', fin.solvency.ok && near(fin.solvency.surplusSol, S1, 0.0001), fin.solvency);
 
+  check('without a wins webhook, the config says so and posting is refused', (await http_('GET', '/api/config')).json.winsEnabled === false && (await http_('POST', '/api/post-win', { winId: 'ab'.repeat(12) }, HA)).status === 503);
+
   console.log('\n== skins: free, paid, owned per wallet ==');
   const cfgS = (await http_('GET', '/api/config')).json;
   check('config lists the skin prices', cfgS.skinPrices && cfgS.skinPrices.rare === 0.03 && cfgS.skinPrices.epic === 0.08 && cfgS.skinPrices.legendary === 0.25, cfgS.skinPrices);
@@ -547,7 +556,7 @@ const errOf = (state) => (state.msgs.find((m) => m.t === 'error') || {}).message
   const feeData = path.join(SP, 'e2e-wallet-data-fee.json');
   for (const f of [feeData, feeData + '.ledger.jsonl']) fs.rmSync(f, { force: true });
   const ownerKp = Keypair.generate();
-  await startServer(game, feeData, { ADMIN_TOKEN: ADMIN, OWNER_ADDRESS: ownerKp.publicKey.toBase58() });
+  await startServer(game, feeData, { ADMIN_TOKEN: ADMIN, OWNER_ADDRESS: ownerKp.publicKey.toBase58(), WINS_WEBHOOK_URL: 'http://localhost:' + HOOK_PORT + '/wins' });
   const KC = Keypair.generate(), KD = Keypair.generate();
   fake.airdrop(KC.publicKey.toBase58(), LAMPORTS_PER_SOL); fake.airdrop(KD.publicKey.toBase58(), LAMPORTS_PER_SOL);
   const LC = await login(KC), LD = await login(KD);
@@ -599,6 +608,30 @@ const errOf = (state) => (state.msgs.find((m) => m.t === 'error') || {}).message
       check('asking for more than the collected fees is refused', tooMuch.status === 400 && tooMuch.json.code === 'over_earnings', tooMuch);
       const ownerBalance = await conn.getBalance(ownerKp.publicKey);
       check('nothing was sent to anyone', ownerBalance === 0);
+
+      // ---- posting the win to the #wins channel ----
+      console.log('\n== posting a verified win to Discord ==');
+      const HC = { 'X-Player-Id': pidC }, HD = { 'X-Player-Id': pidD };
+      check('config says wins can be posted', (await http_('GET', '/api/config')).json.winsEnabled === true);
+      check('the winner was given an id for exactly this win', typeof win.winId === 'string' && win.winId.length >= 16, win);
+      check('posting needs a signed-in wallet', (await http_('POST', '/api/post-win', { winId: win.winId })).status === 401);
+      check('someone else cannot post this win', (await http_('POST', '/api/post-win', { winId: win.winId }, HC)).status === 404);
+      check('an unknown win id is refused', (await http_('POST', '/api/post-win', { winId: 'ab'.repeat(12) }, HD)).status === 404);
+      await admin('POST', '/admin/api/settings', { changes: { winPostMinSol: 5 } });
+      const small = await http_('POST', '/api/post-win', { winId: win.winId }, HD);
+      check('a win under the admin minimum is refused', small.status === 400 && small.json.code === 'too_small' && winPosts.length === 0, small);
+      await admin('POST', '/admin/api/settings', { changes: { winPostMinSol: 0.001 } });
+      const posted = await http_('POST', '/api/post-win', { winId: win.winId }, HD);
+      check('the winner can post it', posted.status === 200 && posted.json.ok === true, posted);
+      const up = winPosts[0];
+      const png = up ? up.body.indexOf(Buffer.from([0x89, 0x50, 0x4e, 0x47])) : -1;
+      check('Discord received one upload with a PNG picture', winPosts.length === 1 && /multipart\/form-data/.test(up.ct) && png > 0, up && up.ct);
+      check('the picture is the full card size (1100 x 640)', png > 0 && up.body.readUInt32BE(png + 16) === 1100 && up.body.readUInt32BE(png + 20) === 640);
+      const text = up ? up.body.toString('latin1') : '';
+      check('the message says verified win and switches mentions off', /verified win/.test(text) && /"allowed_mentions":\{"parse":\[\]\}/.test(text), text.slice(0, 300));
+      check('posting the same win twice is refused', (await http_('POST', '/api/post-win', { winId: win.winId }, HD)).status === 409 && winPosts.length === 1);
+      const ledgerPost = fs.readFileSync(feeData + '.ledger.jsonl', 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((e) => e.type === 'win_posted');
+      check('the post is in the ledger', ledgerPost.length === 1);
     }
   }
   c.ws.close(); d.ws.close();

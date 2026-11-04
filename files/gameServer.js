@@ -180,7 +180,7 @@ class GameWorld {
     const s = this.snakes.get(id);
     if (!s || !s.alive) return null;
     const amount = toDollars(s.length);
-    this.events.push({ type: 'cashout_result', targetId: id, data: { amount, buyin: s.buyin, bestRank: s.bestRank, coinsEaten: s.coinsEaten } });
+    this.events.push({ type: 'cashout_result', targetId: id, data: { amount, buyin: s.buyin, bestRank: s.bestRank, coinsEaten: s.coinsEaten, name: s.name } });
     this.snakes.delete(id);
     return amount;
   }

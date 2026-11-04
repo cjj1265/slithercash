@@ -78,6 +78,19 @@ let connCounter = 1;
  */
 const walletByPlayer = new Map();
 
+// Wins that can still be posted to Discord. A win is recorded here by the server at cash-out, from its own numbers;
+// the player gets only a random id for it, and can post that one win once, within WIN_TTL_MS.
+const wins = require('./wins');
+const winTokens = new Map(); // id -> { walletId, name, buyin, net, ts, posted }
+const WIN_TTL_MS = 15 * 60 * 1000;
+function rememberWin(walletId, name, buyin, net) {
+  const now = Date.now();
+  for (const [id, w] of winTokens) if (now - w.ts > WIN_TTL_MS) winTokens.delete(id);
+  const id = crypto.randomBytes(12).toString('hex');
+  winTokens.set(id, { walletId, name, buyin, net, ts: now, posted: false });
+  return id;
+}
+
 /* ============================== wallet API ============================== */
 
 const CORS_ORIGINS = (process.env.CORS_ORIGIN || '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -172,12 +185,12 @@ async function handleApi(req, res) {
   try {
     const url = new URL(req.url, 'http://localhost');
     const route = req.method + ' ' + url.pathname;
-    const known = ['GET /api/config', 'GET /api/online', 'GET /api/login-challenge', 'POST /api/login', 'GET /api/player-deposit-address', 'GET /api/player-balance', 'POST /api/check-deposit', 'POST /api/withdraw', 'GET /api/skins', 'POST /api/buy-skin'];
+    const known = ['GET /api/config', 'GET /api/online', 'GET /api/login-challenge', 'POST /api/login', 'GET /api/player-deposit-address', 'GET /api/player-balance', 'POST /api/check-deposit', 'POST /api/withdraw', 'GET /api/skins', 'POST /api/buy-skin', 'POST /api/post-win'];
     if (!known.includes(route)) { sendJson(res, 404, { error: 'Not found.' }); return; }
 
     // Public and harmless: lets the page say "Devnet" or not before anyone connects a wallet.
     if (route === 'GET /api/config') {
-      sendJson(res, 200, { enabled: wallet.isEnabled(), network: wallet.getNetwork(), creditsPerSol: wallet.CREDITS_PER_SOL, paused: wallet.isEnabled() ? wallet.isPaused() : false, skinPrices: wallet.getSkinPrices() });
+      sendJson(res, 200, { enabled: wallet.isEnabled(), network: wallet.getNetwork(), creditsPerSol: wallet.CREDITS_PER_SOL, paused: wallet.isEnabled() ? wallet.isPaused() : false, skinPrices: wallet.getSkinPrices(), winsEnabled: wins.enabled() });
       return;
     }
     // Public: the "playing now" counter on the main screen. Just a number, no names or balances.
@@ -237,6 +250,30 @@ async function handleApi(req, res) {
       if (rateLimited('buy-skin', playerId, 10, 60000)) throw new wallet.WalletError('rate_limited', 'Too many requests', 429);
       const r = wallet.buySkin(playerId, body.skin);
       sendJson(res, 200, Object.assign({ ok: true, owned: r.owned }, balanceBody(r.balance)));
+      return;
+    }
+
+    if (route === 'POST /api/post-win') {
+      if (!wins.enabled()) throw new wallet.WalletError('wins_off', 'Posting wins is not set up on this server', 503);
+      if (rateLimited('post-win', playerId, 6, 3600000)) throw new wallet.WalletError('rate_limited', 'You have posted a lot of wins, try again later', 429);
+      const w = winTokens.get(String(body.winId || ''));
+      if (!w || w.walletId !== playerId || Date.now() - w.ts > WIN_TTL_MS) throw new wallet.WalletError('no_win', 'That win can no longer be posted', 404);
+      if (w.posted) throw new wallet.WalletError('already_posted', 'That win is already posted', 409);
+      const profit = w.net - w.buyin; // credits
+      const minSol = wallet.getSettings().winPostMinSol.value;
+      if (profit < minSol * wallet.CREDITS_PER_SOL - 1e-9) throw new wallet.WalletError('too_small', 'Wins under ' + minSol + ' SOL are not posted', 400);
+      w.posted = true; // set first, so a double click cannot post twice
+      const real = wallet.getNetwork() === 'mainnet-beta';
+      const unit = real ? 1 / wallet.CREDITS_PER_SOL : 1; // SOL on mainnet, play money elsewhere
+      try {
+        await wins.postWin({ profit: profit * unit, pct: w.buyin > 0 ? profit / w.buyin * 100 : 0, invested: w.buyin * unit, position: w.net * unit, name: w.name, sym: real ? 'sol' : '$' });
+      } catch (e) {
+        w.posted = false;
+        console.error('[wins] could not post:', e.message);
+        throw new wallet.WalletError('post_failed', 'Could not post right now. Try again in a moment.', 502);
+      }
+      wallet.logLedger('win_posted', { walletId: playerId, profitCredits: profit });
+      sendJson(res, 200, { ok: true });
       return;
     }
 
@@ -654,6 +691,8 @@ function drainEvents(world) {
           const r = wallet.settleCashout(walletId, evt.data.amount, stake.buyin);
           evt.data.fee = r.feeCredits;
           evt.data.net = r.netCredits;
+          // A winning cash-out can be posted to the #wins channel: give the player an id for exactly this win.
+          if (wins.enabled() && r.netCredits > stake.buyin + 1e-9) evt.data.winId = rememberWin(walletId, evt.data.name, stake.buyin, r.netCredits);
         } catch (e) {
           console.error('[wallet] FAILED to credit cash-out of ' + evt.data.amount + ' credits to ' + walletId + ':', e.message);
         }
