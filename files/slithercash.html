@@ -9,7 +9,7 @@
 <meta name="theme-color" content="#0a0d0c">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Anton&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;800&family=Exo+2:ital,wght@1,800;1,900&display=swap" rel="stylesheet">
 <style>
   :root{
     --bg-void:#0a0d0c;
@@ -266,6 +266,13 @@
   #cashOutBtn.armed .co-icon{ color:var(--ruby); }
   @keyframes pulseArm{ 0%,100%{ transform:scale(1);} 50%{ transform:scale(1.045);} }
 
+  /* the cash-out screen is a shareable picture */
+  .cashout-panel{ max-width:min(860px, 94vw); max-height:calc(100vh - 24px); overflow-y:auto; padding:18px; scrollbar-width:none; }
+  .cashout-panel::-webkit-scrollbar{ display:none; }
+  #winCard{ display:block; width:100%; height:auto; border-radius:14px; box-shadow:0 14px 40px rgba(0,0,0,0.55); background:#050505; }
+  .cashout-note{ margin-top:10px; font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--dim); min-height:16px; }
+  .cashout-actions{ display:flex; gap:10px; }
+  .cashout-actions .btn{ flex:1; }
   #deathStats, #cashoutStats{ font-family:'JetBrains Mono',monospace; margin-top:16px; }
   #deathStats .row, #cashoutStats .row{ display:flex; justify-content:space-between; align-items:center; padding:8px 4px; border-bottom:1px solid var(--hairline); font-size:13px; }
   #deathStats .row span:first-child, #cashoutStats .row span:first-child{ color:var(--dim); font-family:'Space Grotesk',sans-serif; font-weight:500; font-size:12.5px; }
@@ -532,16 +539,12 @@
 
 <!-- Cash out screen -->
 <div id="cashoutScreen" class="overlay hidden">
-  <div class="panel">
-    <div class="chip">&#10003;</div>
-    <div class="title" style="color:var(--gold-bright);">CASHED OUT</div>
-    <div class="tagline">You walked away with your stack.</div>
-    <div id="cashoutStats">
-      <div class="row"><span>Final Bankroll</span><span id="cashoutFinalCash">$0.00</span></div>
-      <div class="row sol-hidden" id="cashoutFeeRow"><span id="cashoutFeeLabel">House fee</span><span id="cashoutFee">-$0.00</span></div>
-      <div class="row sol-hidden" id="cashoutNetRow"><span>You received</span><span id="cashoutNet">$0.00</span></div>
-      <div class="row"><span>Best Rank Reached</span><span id="cashoutBestRank">-</span></div>
-      <div class="row"><span>Coins Collected</span><span id="cashoutCoinsEaten">0</span></div>
+  <div class="panel cashout-panel">
+    <canvas id="winCard" width="1672" height="941"></canvas>
+    <div class="cashout-note" id="cashoutNote"></div>
+    <div class="cashout-actions">
+      <button class="btn btn-gold" id="cardShareBtn">Share</button>
+      <button class="btn btn-ghost" id="cardSaveBtn">Save image</button>
     </div>
     <button class="btn btn-ghost" id="cashoutMenuBtn">Back to Main Menu</button>
   </div>
@@ -1873,25 +1876,203 @@ function finalizeNetDeathScreen(){
   netDisconnect();
 }
 
+/* ============================== CASH-OUT PICTURE ============================== */
+/* A 16:9 picture drawn in the browser (nothing is sent to the server). It is a flex, not a receipt: the
+   numbers come from the page, so it proves nothing. Amounts are in SOL on mainnet, play money otherwise. */
+const CARD_W = 1672, CARD_H = 941;
+const MARK_PATH = new Path2D('M43 17 C43 7 19 9 19 22 C19 35 45 29 45 43 C45 56 21 55 19 48');
+let lastCardData = null;
+
+function cardAmount(credits, signed){
+  const v = Math.abs(realMoney() ? credits / SOL.rate : credits);
+  let t;
+  if(v >= 1e6) t = (v / 1e6).toFixed(2) + 'M';
+  else if(v >= 1e3) t = (v / 1e3).toFixed(2) + 'K';
+  else if(v >= 100) t = v.toFixed(1);
+  else if(v >= 1) t = v.toFixed(2);
+  else t = v.toFixed(3);
+  const sign = signed ? (credits < 0 ? '-' : '+') : '';
+  return sign + cashSym() + t;
+}
+
+function drawMark(c, x, y, size){ // x, y = top-left of the glyph; size = its width
+  const s = size / 40;
+  c.save(); c.translate(x - 14 * s, y - 8 * s); c.scale(s, s);
+  const g = c.createLinearGradient(14, 8, 50, 56); g.addColorStop(0, '#ffe27a'); g.addColorStop(1, '#f2a900');
+  c.strokeStyle = g; c.fillStyle = g; c.lineWidth = 10; c.lineCap = 'round'; c.lineJoin = 'round';
+  c.stroke(MARK_PATH);
+  c.beginPath(); c.arc(43, 17, 9, 0, Math.PI * 2); c.fill();
+  c.fillStyle = '#0b0b0b';
+  c.beginPath(); c.arc(40, 14.5, 2.4, 0, Math.PI * 2); c.fill();
+  c.beginPath(); c.arc(46.5, 14.5, 2.4, 0, Math.PI * 2); c.fill();
+  c.restore();
+}
+
+function fitFont(c, text, style, family, size, maxW){
+  for(; size > 20; size -= 4){ c.font = style + ' ' + size + 'px ' + family; if(c.measureText(text).width <= maxW) break; }
+  return size;
+}
+
+function drawWinCard(c, d){
+  const win = d.profit >= 0;
+  const GOLD = '#ffc928', GOLD_LIGHT = '#ffe27a', RED = '#e6465c';
+  const EXO = '"Exo 2", "Space Grotesk", sans-serif', SG = '"Space Grotesk", sans-serif';
+  c.clearRect(0, 0, CARD_W, CARD_H);
+  c.fillStyle = '#050505'; c.fillRect(0, 0, CARD_W, CARD_H);
+
+  // big dark-gold snakes behind everything; the right one brightens to gold at the bottom corner
+  c.save();
+  c.lineCap = 'round'; c.lineJoin = 'round';
+  const snakeFill = c.createLinearGradient(0, 560, 0, CARD_H);
+  snakeFill.addColorStop(0, 'rgba(255,190,40,0.13)'); snakeFill.addColorStop(1, 'rgba(255,200,40,0.95)');
+  c.strokeStyle = snakeFill; c.lineWidth = 270;
+  c.beginPath(); c.moveTo(1550, 175); c.bezierCurveTo(1280, 230, 1250, 420, 1500, 500); c.bezierCurveTo(1760, 590, 1560, 860, 1160, 990); c.stroke();
+  c.fillStyle = 'rgba(0,0,0,0.78)';
+  c.beginPath(); c.arc(1510, 168, 26, 0, Math.PI * 2); c.fill();
+  c.beginPath(); c.arc(1612, 140, 28, 0, Math.PI * 2); c.fill();
+  c.strokeStyle = 'rgba(255,190,40,0.11)'; c.lineWidth = 230;
+  c.beginPath(); c.moveTo(-80, 650); c.bezierCurveTo(220, 520, 540, 600, 720, 770); c.bezierCurveTo(820, 860, 900, 920, 980, 1000); c.stroke();
+  // gold swoosh in the top-left corner
+  const corner = c.createLinearGradient(0, 0, 260, 260); corner.addColorStop(0, '#ffd23f'); corner.addColorStop(1, '#c98a00');
+  c.strokeStyle = corner; c.lineWidth = 90;
+  c.beginPath(); c.arc(-90, -110, 340, 0, Math.PI / 2); c.stroke();
+  c.restore();
+
+  // logo, centred at the top
+  c.save();
+  c.font = 'italic 800 128px ' + EXO; c.textBaseline = 'alphabetic';
+  const wmA = 'snakepay', wmB = '.lol';
+  const wA = c.measureText(wmA).width, wB = c.measureText(wmB).width;
+  const markW = 150, gap = 46, total = markW + gap + wA + wB, x0 = (CARD_W - total) / 2;
+  drawMark(c, x0, 62, markW);
+  c.shadowColor = 'rgba(255,255,255,0.25)'; c.shadowBlur = 18;
+  c.fillStyle = '#f4f4f4'; c.fillText(wmA, x0 + markW + gap, 172);
+  c.shadowColor = 'rgba(255,200,40,0.5)';
+  c.fillStyle = GOLD; c.fillText(wmB, x0 + markW + gap + wA, 172);
+  c.restore();
+
+  // CASHED OUT with gold rules either side
+  c.save();
+  c.font = 'italic 900 132px ' + EXO; c.textBaseline = 'alphabetic';
+  const tA = 'CASHED ', tB = 'OUT';
+  const twA = c.measureText(tA).width, twB = c.measureText(tB).width, tx = (CARD_W - twA - twB) / 2;
+  c.fillStyle = '#ffffff'; c.fillText(tA, tx, 352);
+  c.fillStyle = win ? GOLD : RED; c.fillText(tB, tx + twA, 352);
+  const lineL = c.createLinearGradient(95, 0, tx - 30, 0); lineL.addColorStop(0, 'rgba(255,200,40,0)'); lineL.addColorStop(1, GOLD);
+  const lineR = c.createLinearGradient(tx + twA + twB + 30, 0, 1580, 0); lineR.addColorStop(0, GOLD); lineR.addColorStop(1, 'rgba(255,200,40,0)');
+  c.fillStyle = lineL; c.fillRect(95, 313, tx - 30 - 95, 4);
+  c.fillStyle = lineR; c.fillRect(tx + twA + twB + 30, 313, 1580 - (tx + twA + twB + 30), 4);
+  c.restore();
+
+  // the profit bar
+  c.save();
+  const barX = 360, barY = 380, barW = 952, barH = 146, barR = 26;
+  const barFill = c.createLinearGradient(0, barY, 0, barY + barH);
+  if(win){ barFill.addColorStop(0, '#ffd84a'); barFill.addColorStop(1, '#f2a900'); } else { barFill.addColorStop(0, '#ef5b70'); barFill.addColorStop(1, '#b52a3d'); }
+  c.shadowColor = win ? 'rgba(255,200,40,0.55)' : 'rgba(230,70,92,0.5)'; c.shadowBlur = 40;
+  c.fillStyle = barFill;
+  c.beginPath(); c.roundRect(barX, barY, barW, barH, barR); c.fill();
+  c.shadowBlur = 0;
+  const headline = cardAmount(d.profit, true);
+  const hs = fitFont(c, headline, 'italic 900', EXO, 150, barW - 80);
+  c.font = 'italic 900 ' + hs + 'px ' + EXO;
+  c.fillStyle = win ? '#0b0b0b' : '#ffffff'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.fillText(headline, barX + barW / 2, barY + barH / 2 + 6);
+  c.restore();
+
+  // PNL / Invested / Position
+  c.save();
+  c.textBaseline = 'alphabetic';
+  const rows = [
+    ['PNL', (d.pct >= 0 ? '+' : '-') + Math.abs(d.pct).toFixed(2) + '%', win ? '#4be04b' : RED],
+    ['Invested', cardAmount(d.invested), '#ffffff'],
+    ['Position', cardAmount(d.position), '#ffffff'],
+  ];
+  rows.forEach((r, i) => {
+    const y = 608 + i * 68;
+    c.font = '600 56px ' + SG; c.fillStyle = '#d4d4d4'; c.fillText(r[0], 402, y);
+    c.font = '700 56px ' + SG; c.fillStyle = r[2]; c.fillText(r[1], 740, y);
+  });
+  c.fillStyle = '#4a4a4a'; c.fillRect(686, 566, 3, 194);
+  c.restore();
+
+  // footer
+  c.save();
+  drawMark(c, 70, 814, 56);
+  c.font = 'italic 800 46px ' + EXO; c.textBaseline = 'alphabetic';
+  const fA = c.measureText('snakepay').width;
+  c.fillStyle = '#f4f4f4'; c.fillText('snakepay', 162, 864);
+  c.fillStyle = GOLD; c.fillText('.lol', 162 + fA, 864);
+  c.fillStyle = '#4a4a4a'; c.fillRect(456, 826, 3, 56);
+  c.font = '600 27px ' + SG; c.fillStyle = '#8c8c8c';
+  if('letterSpacing' in c) c.letterSpacing = '7px';
+  let px = 498;
+  [['PLAY', true], ['WIN', true], ['CASH OUT', false]].forEach(([w, dot]) => {
+    c.fillStyle = '#8c8c8c'; c.fillText(w, px, 864);
+    px += c.measureText(w).width + 26;
+    if(dot){ c.fillStyle = GOLD; c.beginPath(); c.arc(px, 855, 5, 0, Math.PI * 2); c.fill(); px += 34; }
+  });
+  if('letterSpacing' in c) c.letterSpacing = '0px';
+  if(d.name){ // the player's name, tucked under the profit bar on the right where the background is dark
+    c.font = '600 34px ' + SG; c.fillStyle = '#b8b8b8'; c.textAlign = 'right';
+    c.fillText(d.name, 1312, 744);
+  }
+  c.restore();
+}
+
+function showWinCard(d){
+  lastCardData = d;
+  const canvas = document.getElementById('winCard');
+  const c = canvas.getContext('2d');
+  drawWinCard(c, d); // draw at once with whatever fonts are ready, then again when the card fonts have loaded
+  if(document.fonts && document.fonts.load){
+    Promise.all([
+      document.fonts.load('italic 900 100px "Exo 2"'), document.fonts.load('italic 800 100px "Exo 2"'),
+      document.fonts.load('600 40px "Space Grotesk"'), document.fonts.load('700 40px "Space Grotesk"'),
+    ]).then(() => { if(lastCardData === d) drawWinCard(c, d); }).catch(()=>{});
+  }
+}
+
+function cardBlob(){
+  return new Promise(resolve => document.getElementById('winCard').toBlob(resolve, 'image/png'));
+}
+async function saveCard(){
+  const blob = await cardBlob(); if(!blob) return;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = 'snakepay-cashout.png';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=> URL.revokeObjectURL(a.href), 4000);
+}
+async function shareCard(){
+  const blob = await cardBlob(); if(!blob) return;
+  const file = new File([blob], 'snakepay-cashout.png', { type: 'image/png' });
+  try{
+    if(navigator.canShare && navigator.canShare({ files: [file] })){
+      await navigator.share({ files: [file], text: 'Cashed out on snakepay.lol' });
+      return;
+    }
+  }catch(e){ if(e && e.name === 'AbortError') return; } // they closed the share sheet
+  saveCard(); // no share sheet on this device (most desktops): save the picture instead
+}
+document.getElementById('cardSaveBtn').addEventListener('click', saveCard);
+document.getElementById('cardShareBtn').addEventListener('click', shareCard);
+
 function handleNetCashout(msg){
   running = false;
   if(!SOL.connected){ wallet += msg.amount; saveWallet(); } // wallet mode: the server already credited the balance
   const received = (SOL.connected && typeof msg.net === 'number') ? msg.net : msg.amount; // after the house fee, in wallet mode
   pushHistory({ buyin: msg.buyin, result: received, net: received - msg.buyin, ts: Date.now() });
 
+  // The picture shows what the player actually received (after the house fee), so it matches their balance.
+  const profit = received - msg.buyin;
   const showFee = SOL.connected && typeof msg.fee === 'number' && msg.fee > 0;
-  document.getElementById('cashoutFeeRow').classList.toggle('sol-hidden', !showFee);
-  document.getElementById('cashoutNetRow').classList.toggle('sol-hidden', !showFee);
-  if(showFee){
-    const pct = SOL.limits && SOL.limits.rakePercent;
-    document.getElementById('cashoutFeeLabel').textContent = 'House fee' + (pct ? ' (' + pct + '% of profit)' : '');
-    document.getElementById('cashoutFee').textContent = '-' + fmtCash(msg.fee);
-    document.getElementById('cashoutNet').textContent = fmtCash(msg.net);
-  }
-
-  document.getElementById('cashoutBestRank').textContent = '#' + msg.bestRank;
-  document.getElementById('cashoutCoinsEaten').textContent = msg.coinsEaten;
-  animateCountUp(document.getElementById('cashoutFinalCash'), 0, msg.amount, 700);
+  document.getElementById('cashoutNote').textContent =
+    (showFee ? 'House fee ' + fmtCash(msg.fee) + ' taken from your profit  ·  ' : '') +
+    'Best rank #' + msg.bestRank + '  ·  ' + msg.coinsEaten + ' coins collected';
+  showWinCard({
+    profit, pct: msg.buyin > 0 ? profit / msg.buyin * 100 : 0,
+    invested: msg.buyin, position: received, name: lastPlayerName,
+  });
 
   hud.classList.add('hud-hidden');
   leaderboardEl.classList.add('hud-hidden');
@@ -1936,6 +2117,7 @@ document.getElementById('skinDoneBtn').addEventListener('click', ()=>{
 });
 
 /* ============================== START / RESTART ============================== */
+let lastPlayerName = '';
 async function startGame(){
   // The server refuses unsigned players too; this just sends them to the Connect button instead of an error.
   if(SOL.walletOn && !SOL.connected){
@@ -1943,6 +2125,7 @@ async function startGame(){
     if(!SOL.connected) return;
   }
   const name = nameInput.value.trim() || randName();
+  lastPlayerName = name;
   // The field is in SOL on mainnet and in play-money dollars otherwise; the server always works in credits.
   let buyin = parseFloat(buyinInput.value) * (buyinInSol ? SOL.rate : 1);
   if(isNaN(buyin) || buyin <= 0) buyin = CFG.DEFAULT_BUYIN;
