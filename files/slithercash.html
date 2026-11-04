@@ -268,20 +268,28 @@
   #cashOutBtn.armed .co-icon{ color:var(--ruby); }
   @keyframes pulseArm{ 0%,100%{ transform:scale(1);} 50%{ transform:scale(1.045);} }
 
-  /* the cash-out screen is a shareable picture */
+  /* the cash-out and death screens: one card that tilts toward the mouse, parts at different depths */
   #cashoutScreen, #deathScreen{ background:#050505; }
-  .result-wrap{ display:flex; flex-direction:column; align-items:center; width:min(740px, 94vw); max-height:100vh; overflow-y:auto; padding:14px 0; scrollbar-width:none; }
+  .result-wrap{ display:flex; flex-direction:column; align-items:center; width:min(640px, 94vw); max-height:100vh; overflow-y:auto; padding:14px 0; scrollbar-width:none; }
   .result-wrap::-webkit-scrollbar{ display:none; }
-  .result-wordmark{ font-family:'Exo 2','Space Grotesk',sans-serif; font-style:italic; font-weight:800; font-size:clamp(34px, 7vw, 56px); line-height:1.1; color:#f4f4f4; text-shadow:0 0 18px rgba(255,255,255,0.2); margin-bottom:16px; }
-  .result-wordmark span{ color:var(--gold-bright); }
-  .result-panel{ width:100%; padding:20px 20px 22px; border-radius:36px; border:1px solid rgba(255,255,255,0.1);
-    background:linear-gradient(180deg, #131313, #0a0a0a); box-shadow:0 26px 70px rgba(0,0,0,0.65), inset 0 1px 0 rgba(255,255,255,0.05); }
-  .result-panel canvas{ display:block; width:100%; height:auto; }
-  .cashout-note{ margin:4px 0 8px; text-align:center; font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--dim); min-height:16px; }
-  .result-actions{ display:flex; gap:12px; }
-  .result-actions .btn{ flex:1; margin-top:6px; display:flex; align-items:center; justify-content:center; gap:10px; border-radius:20px; padding:16px; }
-  .result-actions svg{ width:20px; height:20px; stroke:currentColor; fill:none; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
-  .result-back{ margin-top:12px; padding:10px 16px; background:none; border:none; cursor:pointer; color:var(--white-muted); font:600 16px 'Space Grotesk',sans-serif; }
+  .result-stage{ width:min(540px, 90vw); aspect-ratio:1100 / 640; perspective:900px; }
+  .result-float{ width:100%; height:100%; transform-style:preserve-3d; animation:cardFloat 7s ease-in-out infinite; }
+  .result-card{ position:relative; width:100%; height:100%; border-radius:32px; border:1px solid rgba(255,255,255,0.12);
+    background:linear-gradient(160deg, #181818, #0a0a0a); box-shadow:0 34px 80px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.06);
+    transform-style:preserve-3d; transform:rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)); transition:transform .55s cubic-bezier(.2,.8,.2,1); }
+  .result-card.tilting{ transition:transform .08s linear; }
+  .result-card .layer{ position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
+  .result-card .layer-header{ transform:translateZ(28px); }
+  .result-card .layer-title{ transform:translateZ(56px); }
+  .result-card .layer-bar{ transform:translateZ(84px); }
+  .result-card .layer-stats{ transform:translateZ(36px); }
+  .result-card .layer-name{ transform:translateZ(24px); }
+  .result-card::after{ content:''; position:absolute; inset:0; border-radius:inherit; pointer-events:none; opacity:0; transition:opacity .3s ease;
+    background:radial-gradient(circle at var(--gx, 50%) var(--gy, 30%), rgba(255,255,255,0.16), transparent 55%); mix-blend-mode:screen; transform:translateZ(1px); }
+  .result-card.tilting::after{ opacity:1; }
+  @keyframes cardFloat{ 0%,100%{ transform:translateY(0) rotateX(0deg) rotateY(0deg); } 50%{ transform:translateY(-6px) rotateX(1.6deg) rotateY(-2.2deg); } }
+  @media (prefers-reduced-motion: reduce){ .result-float{ animation:none; } .result-card{ transition:none; } }
+  .result-back{ margin-top:30px; padding:10px 16px; background:none; border:none; cursor:pointer; color:var(--white-muted); font:600 16px 'Space Grotesk',sans-serif; }
   .result-back:hover{ color:var(--gold-bright); }
   #deathStats, #cashoutStats{ font-family:'JetBrains Mono',monospace; margin-top:16px; }
   #deathStats .row, #cashoutStats .row{ display:flex; justify-content:space-between; align-items:center; padding:8px 4px; border-bottom:1px solid var(--hairline); font-size:13px; }
@@ -454,7 +462,7 @@
 </div>
 
 <div id="leaderboard" class="hud-hidden">
-  <h3><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M7 4h10v4a5 5 0 0 1-10 0V4z"/><path d="M7 5H4v2a3 3 0 0 0 3 3M17 5h3v2a3 3 0 0 1-3 3"/><path d="M12 13v3M9 20h6M10 16h4v4h-4z"/></svg> Top Cashers</h3>
+  <h3><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M7 4h10v4a5 5 0 0 1-10 0V4z"/><path d="M7 5H4v2a3 3 0 0 0 3 3M17 5h3v2a3 3 0 0 1-3 3"/><path d="M12 13v3M9 20h6M10 16h4v4h-4z"/></svg> Top Earners</h3>
   <ol id="lbList"></ol>
 </div>
 
@@ -490,7 +498,7 @@
   </div>
   <div class="online-pill" id="onlinePill" style="visibility:hidden"><i></i><span><b id="onlineCount">0</b> playing now</span></div>
   <div class="panel">
-    <input id="nameInput" type="text" maxlength="16" placeholder="Enter your casher name">
+    <input id="nameInput" type="text" maxlength="16" placeholder="Enter name">
 
     <div class="wallet-card">
       <div class="wallet-top">
@@ -553,37 +561,19 @@
 <!-- Cash out screen -->
 <div id="cashoutScreen" class="overlay hidden">
   <div class="result-wrap">
-    <div class="result-wordmark">snakepay<span>.lol</span></div>
-    <div class="result-panel">
-      <canvas id="winCard" width="1100" height="640"></canvas>
-      <div class="cashout-note" id="cashoutNote"></div>
-      <div class="result-actions">
-        <button class="btn btn-gold" id="cardShareBtn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3M12 3l-4 4M12 3l4 4"/><path d="M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7"/></svg>Share</button>
-        <button class="btn btn-ghost" id="cardSaveBtn"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M21 16l-5-5-8 8"/></svg>Save image</button>
-      </div>
-    </div>
+    <div class="result-stage" id="winStage"><div class="result-float"><div class="result-card" id="winCardEl"></div></div></div>
     <button class="result-back" id="cashoutMenuBtn">&#8592; Back to Main Menu</button>
   </div>
 </div>
-
 <!-- Death / game over screen -->
 <div id="deathScreen" class="overlay hidden">
   <div class="result-wrap">
-    <div class="result-wordmark">snakepay<span>.lol</span></div>
-    <div class="result-panel">
-      <canvas id="deathCard" width="1100" height="640"></canvas>
-      <div class="cashout-note" id="deathNote"></div>
-      <div class="result-actions">
-        <button class="btn btn-gold" id="deathShareBtn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3M12 3l-4 4M12 3l4 4"/><path d="M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7"/></svg>Share</button>
-        <button class="btn btn-ghost" id="deathSaveBtn"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M21 16l-5-5-8 8"/></svg>Save image</button>
-      </div>
-    </div>
+    <div class="result-stage" id="deathStage"><div class="result-float"><div class="result-card" id="deathCardEl"></div></div></div>
     <button class="result-back" id="againBtn">&#8592; Back to Main Menu</button>
     <!-- the older single-player code still writes into these, so they stay (hidden) -->
     <div style="display:none"><span id="killLine"></span><span id="finalCash"></span><span id="bestRank"></span><span id="coinsEaten"></span></div>
   </div>
 </div>
-
 <!-- Solana: deposit modal -->
 <div id="depositModal" class="sol-modal hidden">
   <div class="sol-box">
@@ -2012,21 +2002,18 @@ function finalizeNetDeathScreen(){
   const lost = msg.buyin || (player ? player.buyin : 0);
   pushHistory({ buyin: lost, result: 0, net: -lost, ts: Date.now() });
   const killedBy = document.getElementById('killLine').textContent; // "Cut off by <name>" or "Ran into the wall"
-  document.getElementById('deathNote').textContent = 'Best rank #' + (msg.bestRank || playerBestRank) + '  ·  ' + (msg.coinsEaten || 0) + ' coins collected';
   showResultCard('loss', {
     profit: -lost, pct: -100, invested: lost, position: 0,
-    sub: (lastPlayerName ? lastPlayerName + '  ·  ' : '') + killedBy,
+    sub: (lastPlayerName ? '@' + lastPlayerName + '  ·  ' : '') + killedBy,
   });
   deathScreen.classList.remove('hidden');
   deathVeil.style.opacity = 0;
   netDisconnect();
 }
 
-/* ============================== CASH-OUT PICTURE ============================== */
-/* A 16:9 picture drawn in the browser (nothing is sent to the server). It is a flex, not a receipt: the
-   numbers come from the page, so it proves nothing. Amounts are in SOL on mainnet, play money otherwise. */
-const MARK_PATH = new Path2D('M43 17 C43 7 19 9 19 22 C19 35 45 29 45 43 C45 56 21 55 19 48');
-
+/* ============================== CASH-OUT AND DEATH CARD ============================== */
+/* Drawn in the browser from numbers the page already has (nothing is sent to the server). Amounts are in SOL
+   on mainnet and play money otherwise. */
 // Amount as separate pieces (sign, symbol, number) so the symbol can be drawn with room around it.
 // sym: 'sol' (a drawn ring), '$' or null (no symbol).
 function cardParts(credits, signed){
@@ -2066,141 +2053,130 @@ function drawAmount(c, p, x, baseY, font, size, color, align){
   c.restore();
 }
 
-function drawMark(c, x, y, size, color){ // x, y = top-left of the glyph; size = its width; color = one flat colour (optional)
-  const s = size / 40;
-  c.save(); c.translate(x - 14 * s, y - 8 * s); c.scale(s, s);
-  let fill = color;
-  if(!fill){ fill = c.createLinearGradient(14, 8, 50, 56); fill.addColorStop(0, '#ffe27a'); fill.addColorStop(1, '#f2a900'); }
-  c.strokeStyle = fill; c.fillStyle = fill; c.lineWidth = 10; c.lineCap = 'round'; c.lineJoin = 'round';
-  c.stroke(MARK_PATH);
-  c.beginPath(); c.arc(43, 17, 9, 0, Math.PI * 2); c.fill();
-  c.fillStyle = '#0b0b0b';
-  c.beginPath(); c.arc(40, 14.5, 2.4, 0, Math.PI * 2); c.fill();
-  c.beginPath(); c.arc(46.5, 14.5, 2.4, 0, Math.PI * 2); c.fill();
-  c.restore();
-}
 
 const GOLD = '#ffc928', RED = '#e6465c';
 const EXO = '"Exo 2", "Space Grotesk", sans-serif', SG = '"Space Grotesk", sans-serif';
-const FACE_W = 1100, FACE_H = 640; // the part of the picture that is also shown on screen
+const FACE_W = 1100, FACE_H = 640; // the card is drawn at this size and scaled to fit the screen
 
-/* The card face: medallion, title, amount bar and the PNL / Invested / Position box, drawn on a transparent
-   background. d.kind is 'win' or 'loss'; the buttons and the page's own panel are HTML around it. */
-function drawFace(c, d){
-  const win = d.kind !== 'loss';
-  const accent = win ? GOLD : RED, ink = win ? '#0b0b0b' : '#ffffff', MID = FACE_W / 2;
+/* The result card is a stack of transparent canvases, one per part (wordmark, title, amount bar, stats, name).
+   Each part sits at its own depth in 3D, so when the card tilts with the mouse the parts shift against each
+   other. d.kind is 'win' or 'loss'. */
+const FACE_LAYERS = {
+  header(c, d){
+    const win = d.kind !== 'loss', accent = win ? GOLD : RED, MID = FACE_W / 2;
+    c.save();
+    c.font = 'italic 800 92px ' + EXO; c.textBaseline = 'alphabetic';
+    const wA = c.measureText('snakepay').width, wB = c.measureText('.lol').width, wx = MID - (wA + wB) / 2;
+    c.shadowColor = 'rgba(255,255,255,0.22)'; c.shadowBlur = 16;
+    c.fillStyle = '#f4f4f4'; c.fillText('snakepay', wx, 112);
+    c.shadowColor = 'rgba(255,200,40,0.5)';
+    c.fillStyle = GOLD; c.fillText('.lol', wx + wA, 112);
+    c.restore();
+    // glowing rules either side of the wordmark
+    const left = wx - 36, right = wx + wA + wB + 36;
+    c.save();
+    [[80, 0.9], [104, 0.4]].forEach(([y, alpha]) => {
+      const gl = c.createLinearGradient(44, 0, left, 0); gl.addColorStop(0, 'rgba(0,0,0,0)'); gl.addColorStop(1, accent);
+      const gr = c.createLinearGradient(right, 0, FACE_W - 44, 0); gr.addColorStop(0, accent); gr.addColorStop(1, 'rgba(0,0,0,0)');
+      c.globalAlpha = alpha;
+      c.fillStyle = gl; c.fillRect(44, y, left - 44, 3);
+      c.fillStyle = gr; c.fillRect(right, y, FACE_W - 44 - right, 3);
+    });
+    c.restore();
+  },
 
-  // gold (or red) glow lines either side of the medallion
-  c.save();
-  const lineA = (y, alpha) => {
-    const gl = c.createLinearGradient(60, 0, MID - 100, 0); gl.addColorStop(0, 'rgba(0,0,0,0)'); gl.addColorStop(1, accent);
-    const gr = c.createLinearGradient(MID + 100, 0, FACE_W - 60, 0); gr.addColorStop(0, accent); gr.addColorStop(1, 'rgba(0,0,0,0)');
-    c.globalAlpha = alpha;
-    c.fillStyle = gl; c.fillRect(60, y, MID - 160, 3);
-    c.fillStyle = gr; c.fillRect(MID + 100, y, MID - 160, 3);
-  };
-  lineA(78, 0.9); lineA(114, 0.4);
-  c.restore();
+  title(c, d){
+    const win = d.kind !== 'loss', accent = win ? GOLD : RED, MID = FACE_W / 2;
+    const tA = d.titleA + ' ', tB = d.titleB;
+    c.save();
+    let ts = 118;
+    for(; ts > 40; ts -= 4){ c.font = 'italic 900 ' + ts + 'px ' + EXO; if(c.measureText(tA + tB).width <= 840) break; }
+    const twA = c.measureText(tA).width, twB = c.measureText(tB).width, tx = MID - (twA + twB) / 2;
+    c.textBaseline = 'alphabetic';
+    c.shadowColor = 'rgba(255,255,255,0.18)'; c.shadowBlur = 14;
+    c.fillStyle = '#ffffff'; c.fillText(tA, tx, 262);
+    c.shadowColor = win ? 'rgba(255,200,40,0.45)' : 'rgba(230,70,92,0.45)';
+    c.fillStyle = accent; c.fillText(tB, tx + twA, 262);
+    c.restore();
+  },
 
-  // medallion
-  c.save();
-  const cy = 98, R = 76;
-  c.shadowColor = win ? 'rgba(255,200,40,0.7)' : 'rgba(230,70,92,0.65)'; c.shadowBlur = 38;
-  const bg = c.createRadialGradient(MID, cy - 20, 10, MID, cy, R);
-  bg.addColorStop(0, win ? '#241b00' : '#2a0c12'); bg.addColorStop(1, '#070707');
-  c.fillStyle = bg; c.beginPath(); c.arc(MID, cy, R, 0, Math.PI * 2); c.fill();
-  c.shadowBlur = 0;
-  const ring = c.createLinearGradient(MID - R, cy - R, MID + R, cy + R);
-  if(win){ ring.addColorStop(0, '#ffe27a'); ring.addColorStop(1, '#c98a00'); } else { ring.addColorStop(0, '#ff8f9f'); ring.addColorStop(1, '#a3283a'); }
-  c.strokeStyle = ring; c.lineWidth = 6; c.beginPath(); c.arc(MID, cy, R - 3, 0, Math.PI * 2); c.stroke();
-  drawMark(c, MID - 34, cy - 40, 68, win ? null : RED);
-  c.restore();
+  bar(c, d){
+    const win = d.kind !== 'loss', ink = win ? '#0b0b0b' : '#ffffff', MID = FACE_W / 2;
+    c.save();
+    const barW = 890, barH = 112, barX = MID - barW / 2, barY = 296;
+    const fill = c.createLinearGradient(0, barY, 0, barY + barH);
+    if(win){ fill.addColorStop(0, '#ffd84a'); fill.addColorStop(1, '#f2a900'); } else { fill.addColorStop(0, '#ef5b70'); fill.addColorStop(1, '#b52a3d'); }
+    c.shadowColor = win ? 'rgba(255,200,40,0.55)' : 'rgba(230,70,92,0.5)'; c.shadowBlur = 36;
+    c.fillStyle = fill; c.beginPath(); c.roundRect(barX, barY, barW, barH, barH / 2); c.fill();
+    c.shadowBlur = 0;
+    // a coin, then the amount, as one group centred in the bar
+    const head = cardParts(d.profit, true), headNum = { sign: head.sign, sym: null, num: head.num };
+    const coinD = 76, coinGap = 34;
+    let hs = 92;
+    for(; hs > 24; hs -= 4){ c.font = 'italic 900 ' + hs + 'px ' + EXO; if(coinD + coinGap + measureAmount(c, headNum, hs) <= barW - 120) break; }
+    c.font = 'italic 900 ' + hs + 'px ' + EXO;
+    const groupW = coinD + coinGap + measureAmount(c, headNum, hs), gx = MID - groupW / 2, midY = barY + barH / 2;
+    c.strokeStyle = ink; c.fillStyle = ink; c.lineWidth = 7;
+    c.beginPath(); c.arc(gx + coinD / 2, midY, coinD / 2 - 3.5, 0, Math.PI * 2); c.stroke();
+    if(head.sym === 'sol'){
+      c.lineWidth = 6; c.beginPath(); c.arc(gx + coinD / 2, midY, 15, 0, Math.PI * 2); c.stroke();
+      c.beginPath(); c.arc(gx + coinD / 2, midY, 5.5, 0, Math.PI * 2); c.fill();
+    } else {
+      c.font = '800 46px ' + SG; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('$', gx + coinD / 2, midY + 2);
+    }
+    drawAmount(c, headNum, gx + coinD + coinGap, midY + hs * 0.35, 'italic 900 ' + hs + 'px ' + EXO, hs, ink, 'left');
+    c.restore();
+  },
 
-  // title
-  c.save();
-  const tA = d.titleA + ' ', tB = d.titleB;
-  let ts = 118;
-  for(; ts > 40; ts -= 4){ c.font = 'italic 900 ' + ts + 'px ' + EXO; if(c.measureText(tA + tB).width <= 840) break; }
-  const twA = c.measureText(tA).width, twB = c.measureText(tB).width, tx = MID - (twA + twB) / 2;
-  c.textBaseline = 'alphabetic';
-  c.shadowColor = 'rgba(255,255,255,0.18)'; c.shadowBlur = 14;
-  c.fillStyle = '#ffffff'; c.fillText(tA, tx, 300);
-  c.shadowColor = win ? 'rgba(255,200,40,0.45)' : 'rgba(230,70,92,0.45)';
-  c.fillStyle = accent; c.fillText(tB, tx + twA, 300);
-  c.restore();
+  stats(c, d){
+    const win = d.kind !== 'loss';
+    c.save();
+    const bx = 50, by = 432, bw = FACE_W - 100, bh = 124;
+    c.fillStyle = '#0e0e0e'; c.beginPath(); c.roundRect(bx, by, bw, bh, 30); c.fill();
+    c.strokeStyle = 'rgba(255,255,255,0.09)'; c.lineWidth = 2; c.beginPath(); c.roundRect(bx, by, bw, bh, 30); c.stroke();
+    const colW = bw / 3, centers = [bx + colW / 2, bx + colW * 1.5, bx + colW * 2.5];
+    c.fillStyle = '#2c2c2c'; c.fillRect(bx + colW - 1, by + 26, 2, bh - 52); c.fillRect(bx + colW * 2 - 1, by + 26, 2, bh - 52);
+    const pct = (d.pct >= 0 ? '+' : '-') + Math.abs(d.pct).toFixed(2) + '%';
+    c.textAlign = 'center'; c.textBaseline = 'alphabetic';
+    ['PNL', 'Invested', 'Position'].forEach((l, i) => { c.font = '500 34px ' + SG; c.fillStyle = '#9a9a9a'; c.fillText(l, centers[i], by + 50); });
+    c.font = '700 52px ' + SG; c.fillStyle = win ? '#4be04b' : RED; c.fillText(pct, centers[0], by + 105);
+    drawAmount(c, cardParts(d.invested), centers[1], by + 105, '700 52px ' + SG, 52, '#ffffff', 'center');
+    drawAmount(c, cardParts(d.position), centers[2], by + 105, '700 52px ' + SG, 52, '#ffffff', 'center');
+    c.restore();
+  },
 
-  // the amount bar: a coin, then the amount, as one group centred in the bar
-  c.save();
-  const barW = 890, barH = 112, barX = MID - barW / 2, barY = 328;
-  const fill = c.createLinearGradient(0, barY, 0, barY + barH);
-  if(win){ fill.addColorStop(0, '#ffd84a'); fill.addColorStop(1, '#f2a900'); } else { fill.addColorStop(0, '#ef5b70'); fill.addColorStop(1, '#b52a3d'); }
-  c.shadowColor = win ? 'rgba(255,200,40,0.55)' : 'rgba(230,70,92,0.5)'; c.shadowBlur = 36;
-  c.fillStyle = fill; c.beginPath(); c.roundRect(barX, barY, barW, barH, barH / 2); c.fill();
-  c.shadowBlur = 0;
-  const head = cardParts(d.profit, true), headNum = { sign: head.sign, sym: null, num: head.num };
-  let hs = 92;
-  const coinD = 76, coinGap = 34;
-  for(; hs > 24; hs -= 4){ c.font = 'italic 900 ' + hs + 'px ' + EXO; if(coinD + coinGap + measureAmount(c, headNum, hs) <= barW - 120) break; }
-  c.font = 'italic 900 ' + hs + 'px ' + EXO;
-  const groupW = coinD + coinGap + measureAmount(c, headNum, hs), gx = MID - groupW / 2, midY = barY + barH / 2;
-  c.strokeStyle = ink; c.fillStyle = ink; c.lineWidth = 7;
-  c.beginPath(); c.arc(gx + coinD / 2, midY, coinD / 2 - 3.5, 0, Math.PI * 2); c.stroke();
-  if(head.sym === 'sol'){
-    c.lineWidth = 6; c.beginPath(); c.arc(gx + coinD / 2, midY, 15, 0, Math.PI * 2); c.stroke();
-    c.beginPath(); c.arc(gx + coinD / 2, midY, 5.5, 0, Math.PI * 2); c.fill();
-  } else {
-    c.font = '800 46px ' + SG; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('$', gx + coinD / 2, midY + 2);
-  }
-  drawAmount(c, headNum, gx + coinD + coinGap, midY + hs * 0.35, 'italic 900 ' + hs + 'px ' + EXO, hs, ink, 'left');
-  c.restore();
+  name(c, d){
+    if(!d.sub) return;
+    c.save();
+    c.font = 'italic 800 32px ' + EXO; c.fillStyle = '#c4c4c4'; c.textAlign = 'center'; c.textBaseline = 'alphabetic';
+    c.shadowColor = 'rgba(0,0,0,0.6)'; c.shadowBlur = 6;
+    c.fillText(d.sub, FACE_W / 2, 606);
+    c.restore();
+  },
+};
+const FACE_LAYER_NAMES = Object.keys(FACE_LAYERS);
 
-  // PNL / Invested / Position in one rounded box, three centred columns
-  c.save();
-  const bx = 50, by = 466, bw = FACE_W - 100, bh = 124;
-  c.fillStyle = '#0e0e0e'; c.beginPath(); c.roundRect(bx, by, bw, bh, 30); c.fill();
-  c.strokeStyle = 'rgba(255,255,255,0.09)'; c.lineWidth = 2; c.beginPath(); c.roundRect(bx, by, bw, bh, 30); c.stroke();
-  const colW = bw / 3, centers = [bx + colW / 2, bx + colW * 1.5, bx + colW * 2.5];
-  c.fillStyle = '#2c2c2c'; c.fillRect(bx + colW - 1, by + 26, 2, bh - 52); c.fillRect(bx + colW * 2 - 1, by + 26, 2, bh - 52);
-  const pct = (d.pct >= 0 ? '+' : '-') + Math.abs(d.pct).toFixed(2) + '%';
-  c.textAlign = 'center'; c.textBaseline = 'alphabetic';
-  ['PNL', 'Invested', 'Position'].forEach((l, i) => { c.font = '500 34px ' + SG; c.fillStyle = '#9a9a9a'; c.fillText(l, centers[i], by + 50); });
-  c.font = '700 52px ' + SG; c.fillStyle = win ? '#4be04b' : RED; c.fillText(pct, centers[0], by + 105);
-  drawAmount(c, cardParts(d.invested), centers[1], by + 105, '700 52px ' + SG, 52, '#ffffff', 'center');
-  drawAmount(c, cardParts(d.position), centers[2], by + 105, '700 52px ' + SG, 52, '#ffffff', 'center');
-  c.restore();
+function drawFace(c, d, layer){ c.clearRect(0, 0, FACE_W, FACE_H); FACE_LAYERS[layer](c, d); }
 
-  // the player's name (and, after a death, who got them)
-  if(d.sub){
-    c.save(); c.font = '600 28px ' + SG; c.fillStyle = '#8c8c8c'; c.textAlign = 'center'; c.fillText(d.sub, MID, 626); c.restore();
-  }
-}
-
-/* The picture people save and share: the face on a black page with the wordmark above it. */
-function renderExport(d){
-  const cv = document.createElement('canvas'); cv.width = 1672; cv.height = 941;
-  const c = cv.getContext('2d');
-  c.fillStyle = '#050505'; c.fillRect(0, 0, 1672, 941);
-  c.save();
-  c.font = 'italic 800 96px ' + EXO; c.textBaseline = 'alphabetic';
-  const wA = c.measureText('snakepay').width, wB = c.measureText('.lol').width, wx = 836 - (wA + wB) / 2;
-  c.shadowColor = 'rgba(255,255,255,0.22)'; c.shadowBlur = 16;
-  c.fillStyle = '#f4f4f4'; c.fillText('snakepay', wx, 128);
-  c.shadowColor = 'rgba(255,200,40,0.5)'; c.fillStyle = GOLD; c.fillText('.lol', wx + wA, 128);
-  c.restore();
-  const g = c.createLinearGradient(0, 168, 0, 898); g.addColorStop(0, '#131313'); g.addColorStop(1, '#0a0a0a');
-  c.fillStyle = g; c.beginPath(); c.roundRect(226, 168, 1220, 730, 46); c.fill();
-  c.strokeStyle = 'rgba(255,255,255,0.1)'; c.lineWidth = 2; c.beginPath(); c.roundRect(226, 168, 1220, 730, 46); c.stroke();
-  c.save(); c.translate(286, 200); drawFace(c, d); c.restore();
-  return cv;
+/** Creates the stack of layer canvases inside a card (once). */
+function buildCardLayers(card){
+  if(card.dataset.built) return;
+  FACE_LAYER_NAMES.forEach(n => {
+    const cv = document.createElement('canvas');
+    cv.width = FACE_W; cv.height = FACE_H; cv.className = 'layer layer-' + n; cv.dataset.layer = n;
+    card.appendChild(cv);
+  });
+  card.dataset.built = '1';
 }
 
 const resultCards = { win: null, loss: null };
-/* Fills the on-screen canvas for the cash-out ('win') or death ('loss') screen. */
+/* Fills the card on the cash-out ('win') or death ('loss') screen. */
 function showResultCard(kind, data){
   const d = Object.assign({ kind }, data, kind === 'loss' ? { titleA: 'YOU', titleB: 'DIED' } : { titleA: 'CASHED', titleB: 'OUT' });
   resultCards[kind] = d;
-  const c = document.getElementById(kind === 'loss' ? 'deathCard' : 'winCard').getContext('2d');
-  const paint = () => { c.clearRect(0, 0, FACE_W, FACE_H); drawFace(c, d); }; // the screen canvas is transparent
+  const card = document.getElementById(kind === 'loss' ? 'deathCardEl' : 'winCardEl');
+  buildCardLayers(card);
+  const paint = () => card.querySelectorAll('canvas.layer').forEach(cv => drawFace(cv.getContext('2d'), d, cv.dataset.layer));
   paint(); // at once with whatever fonts are ready, then again when the card fonts have loaded
   if(document.fonts && document.fonts.load){
     Promise.all([
@@ -2210,35 +2186,27 @@ function showResultCard(kind, data){
   }
 }
 
-async function exportBlob(kind){
-  const d = resultCards[kind]; if(!d) return null;
-  if(document.fonts && document.fonts.load){
-    try{ await Promise.all([document.fonts.load('italic 900 100px "Exo 2"'), document.fonts.load('italic 800 100px "Exo 2"'), document.fonts.load('500 40px "Space Grotesk"'), document.fonts.load('600 40px "Space Grotesk"'), document.fonts.load('700 40px "Space Grotesk"')]); }catch(e){}
-  }
-  return new Promise(resolve => renderExport(d).toBlob(resolve, 'image/png'));
+/* Tilt toward the mouse: the card turns up to about 12 degrees, and a soft highlight follows the pointer. */
+function initCardTilt(stage){
+  const card = stage.querySelector('.result-card');
+  const MAX = 12;
+  const setTilt = (rx, ry, gx, gy) => {
+    card.style.setProperty('--rx', rx.toFixed(2) + 'deg'); card.style.setProperty('--ry', ry.toFixed(2) + 'deg');
+    card.style.setProperty('--gx', gx.toFixed(1) + '%'); card.style.setProperty('--gy', gy.toFixed(1) + '%');
+  };
+  stage.addEventListener('pointermove', (e) => {
+    const r = stage.getBoundingClientRect();
+    if(!(r.width > 0 && r.height > 0)) return;
+    const x = clamp((e.clientX - r.left) / r.width, 0, 1), y = clamp((e.clientY - r.top) / r.height, 0, 1);
+    setTilt(-(y - 0.5) * MAX * 2, (x - 0.5) * MAX * 2, x * 100, y * 100);
+    card.classList.add('tilting');
+  });
+  const rest = () => { card.classList.remove('tilting'); setTilt(0, 0, 50, 30); };
+  stage.addEventListener('pointerleave', rest);
+  stage.addEventListener('pointercancel', rest);
 }
-async function saveCard(kind){
-  const blob = await exportBlob(kind); if(!blob) return;
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob); a.download = kind === 'loss' ? 'snakepay-rekt.png' : 'snakepay-cashout.png';
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(()=> URL.revokeObjectURL(a.href), 4000);
-}
-async function shareCard(kind){
-  const blob = await exportBlob(kind); if(!blob) return;
-  const file = new File([blob], kind === 'loss' ? 'snakepay-rekt.png' : 'snakepay-cashout.png', { type: 'image/png' });
-  try{
-    if(navigator.canShare && navigator.canShare({ files: [file] })){
-      await navigator.share({ files: [file], text: kind === 'loss' ? 'Got eliminated on snakepay.lol' : 'Cashed out on snakepay.lol' });
-      return;
-    }
-  }catch(e){ if(e && e.name === 'AbortError') return; } // they closed the share sheet
-  saveCard(kind); // no share sheet on this device (most desktops): save the picture instead
-}
-document.getElementById('cardSaveBtn').addEventListener('click', ()=> saveCard('win'));
-document.getElementById('cardShareBtn').addEventListener('click', ()=> shareCard('win'));
-document.getElementById('deathSaveBtn').addEventListener('click', ()=> saveCard('loss'));
-document.getElementById('deathShareBtn').addEventListener('click', ()=> shareCard('loss'));
+initCardTilt(document.getElementById('winStage'));
+initCardTilt(document.getElementById('deathStage'));
 
 function handleNetCashout(msg){
   running = false;
@@ -2248,13 +2216,9 @@ function handleNetCashout(msg){
 
   // The picture shows what the player actually received (after the house fee), so it matches their balance.
   const profit = received - msg.buyin;
-  const showFee = SOL.connected && typeof msg.fee === 'number' && msg.fee > 0;
-  document.getElementById('cashoutNote').textContent =
-    (showFee ? 'House fee ' + fmtCash(msg.fee) + ' taken from your profit  ·  ' : '') +
-    'Best rank #' + msg.bestRank + '  ·  ' + msg.coinsEaten + ' coins collected';
   showResultCard('win', {
     profit, pct: msg.buyin > 0 ? profit / msg.buyin * 100 : 0,
-    invested: msg.buyin, position: received, sub: lastPlayerName,
+    invested: msg.buyin, position: received, sub: lastPlayerName ? '@' + lastPlayerName : '',
   });
 
   hud.classList.add('hud-hidden');
