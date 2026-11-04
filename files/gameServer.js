@@ -111,7 +111,7 @@ class GameWorld {
     const r = Math.sqrt(Math.random()) * (CFG.WORLD_RADIUS * (isPlayer ? 0.5 : 0.75));
     const ang = rand(0, Math.PI * 2);
     return {
-      id, name, isPlayer, alive: true,
+      id, name, isPlayer, alive: true, bornAt: this.elapsed,
       skinIndex: skinIndex % SKIN_COUNT,
       colorSeed: rand(0, 999),
       head: { x: Math.cos(a) * r, y: Math.sin(a) * r },

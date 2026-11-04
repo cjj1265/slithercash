@@ -374,6 +374,61 @@ const errOf = (state) => (state.msgs.find((m) => m.t === 'error') || {}).message
   check('withdrawals work again after resume', (await http_('POST', '/api/withdraw', { playerAddress: A.publicKey.toBase58(), solAmount: 0.01, playerId: pidA, idempotencyKey: 'e2e-key-resumed01' })).status === 200);
   const ta = await admin('POST', '/admin/api/test-alert');
   check('test alert reaches the webhook', ta.json.configured === true && (await alertSeen('Test alert')), alerts);
+  console.log('\n== admin: live players, kick, ban, settings, audit, activity ==');
+  const live1 = await wsOpen(pidA, 5);
+  await sleep(400);
+  const lst = (await admin('GET', '/admin/api/status')).json;
+  const lrow = (lst.live || []).find((p) => p.snakeId === live1.id);
+  check('live list shows the player with stake and wallet', lrow && near(lrow.stakeSol, 0.05, 1e-6) && lrow.owner === A.publicKey.toBase58(), lst.live);
+  check('live list carries no bearer ids', !JSON.stringify(lst.live).includes(pidA));
+  const gotCashout = new Promise((resolve) => { live1.ws.addEventListener('message', (ev) => { const m = JSON.parse(ev.data); if (m.t === 'cashout_result') resolve(m); }); setTimeout(() => resolve(null), 4000); });
+  const kk = await admin('POST', '/admin/api/kick', { snakeId: live1.id });
+  const kmsg = await gotCashout;
+  check('kick (pay out) removes the player and returns the full stake', kk.status === 200 && kmsg && near(kmsg.amount, 5, 1e-6) && near((await balanceOf(pidA)).sol, 0.08), [kk, kmsg]);
+  live1.ws.close();
+  check('kicking someone who is not in a game -> 404', (await admin('POST', '/admin/api/kick', { snakeId: 'nobody' })).status === 404);
+
+  const bnn = await admin('POST', '/admin/api/ban', { owner: B.publicKey.toBase58(), reason: 'e2e test ban' });
+  check('admin can ban a wallet', bnn.status === 200, bnn);
+  const bj2 = await wsOpen(pidB, 5);
+  check('a banned wallet cannot buy in', /not allowed to play/i.test(errOf(bj2) || '') && !bj2.id, bj2.msgs);
+  bj2.ws.close();
+  check('a banned wallet keeps its balance and can still read it', near((await balanceOf(pidB)).sol, 0.06));
+  check('banning an unknown wallet -> 404', (await admin('POST', '/admin/api/ban', { owner: 'NotARealPlayerAddress' })).status === 404);
+  check('ban shows in the admin status', ((await admin('GET', '/admin/api/status')).json.bans || []).some((b) => b.owner === B.publicKey.toBase58() && b.reason === 'e2e test ban'));
+  check('admin can unban', (await admin('POST', '/admin/api/unban', { owner: B.publicKey.toBase58() })).status === 200);
+  const bj3 = await wsOpen(pidB, 5);
+  check('an unbanned wallet can play again', !!bj3.id, bj3.msgs);
+  await wsCashout(bj3); bj3.ws.close();
+  check('unbanned wallet\'s stake came back', near((await balanceOf(pidB)).sol, 0.06));
+
+  const set1 = await admin('POST', '/admin/api/settings', { changes: { maxBuyinCredits: 15, cashoutHoldSec: 0.5 } });
+  check('admin can change settings', set1.status === 200 && set1.json.settings.maxBuyinCredits.value === 15, set1);
+  const over15 = await wsOpen(pidA, 18);
+  check('a lowered buy-in limit applies at once', /maximum buy-in/i.test(errOf(over15) || '') && (errOf(over15) || '').includes('$15'), over15.msgs);
+  over15.ws.close();
+  const badHi = await admin('POST', '/admin/api/settings', { changes: { maxBuyinCredits: 9999 } });
+  check('a value past its hard bound is refused', badHi.status === 400 && /between/.test(badHi.json.error), badHi);
+  check('an unknown setting is refused', (await admin('POST', '/admin/api/settings', { changes: { bogus: 1 } })).status === 400);
+  check('not-a-number is refused', (await admin('POST', '/admin/api/settings', { changes: { rakePercent: 'abc' } })).status === 400);
+  const badOrder = await admin('POST', '/admin/api/settings', { changes: { maxWithdrawSol: 3 } });
+  check('a per-withdrawal limit above the daily limits is refused', badOrder.status === 400, badOrder);
+  check('a refused change changed nothing', (await admin('GET', '/admin/api/status')).json.settings.maxBuyinCredits.value === 15);
+  check('settings alert sent', await alertSeen('Settings changed'), alerts);
+  await stopServer();
+  await startServer(game, DATA, LIMIT_ENV);
+  const afterRestart = (await admin('GET', '/admin/api/status')).json;
+  check('settings survive a restart', afterRestart.settings.maxBuyinCredits.value === 15 && afterRestart.settings.cashoutHoldSec.value === 0.5, afterRestart.settings);
+  await admin('POST', '/admin/api/settings', { changes: { maxBuyinCredits: 20, cashoutHoldSec: 0.6 } });
+
+  const ast = (await admin('GET', '/admin/api/status')).json;
+  const acts = (ast.audit || []).map((a) => a.action);
+  check('every admin action is in the audit log', ['kick (pay out)', 'ban', 'unban', 'settings'].every((x) => acts.includes(x)), acts);
+  check('audit entries record where the request came from', (ast.audit || []).every((a) => typeof a.ip === 'string' && a.ip.length > 0), ast.audit);
+  const today = ast.activity.days[ast.activity.days.length - 1];
+  check('activity covers 14 days and counts today\'s games', ast.activity.days.length === 14 && today.games >= 3 && ast.activity.totalGames >= today.games, today);
+  check('wrong admin token cannot change settings', (await admin('POST', '/admin/api/settings', { changes: { maxBuyinCredits: 500 } }, 'wrong-token-wrong-token-1')).status === 401);
+
   const fin = (await admin('GET', '/admin/api/status')).json;
   check('still solvent after all of that, surplus unchanged', fin.solvency.ok && near(fin.solvency.surplusSol, S1, 0.0001), fin.solvency);
 

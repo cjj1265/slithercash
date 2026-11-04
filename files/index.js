@@ -265,12 +265,52 @@ function adminAuthorized(req) {
   return crypto.timingSafeEqual(given, wanted);
 }
 
+// The cash-out hold is an admin setting (stored with the wallet data); the game reads it from CFG.
+function applyCashoutHold() {
+  const s = wallet.getSettings().cashoutHoldSec;
+  if (s && Number.isFinite(s.value)) CFG.CASHOUT_HOLD_SEC = s.value;
+}
+
+/** Everyone in a real-money game right now, for the admin page. Snake ids are already public (every snapshot carries them). */
+function livePlayers() {
+  const out = [];
+  for (const s of realWorld.snakes.values()) {
+    if (!s.isPlayer || !s.alive) continue;
+    const link = walletByPlayer.get(s.id);
+    out.push({
+      snakeId: s.id, name: s.name, owner: link ? wallet.ownerOf(link.walletId) : null,
+      stakeSol: link ? link.buyin / wallet.CREDITS_PER_SOL : 0,
+      valueSol: (s.length / CFG.LEN_PER_DOLLAR) / wallet.CREDITS_PER_SOL,
+      aliveSec: Math.round(realWorld.elapsed - s.bornAt),
+      holdingCashout: s.cashoutHold !== undefined && s.cashoutHold !== null,
+    });
+  }
+  return out.sort((a, b) => b.valueSol - a.valueSol);
+}
+
+/** Take a player out of the game. Paying out credits what the snake is worth now; forfeiting drops it on the map like a death. */
+function kickSnake(snakeId, forfeit) {
+  const s = realWorld.snakes.get(snakeId);
+  if (!s || !s.isPlayer || !s.alive) return false;
+  if (forfeit) realWorld._kill(s, 'the house');
+  else realWorld.requestCashout(snakeId);
+  return true;
+}
+
+/** Everything done from the admin page is written to the ledger with the caller's address, and shown in the audit card. */
+function audit(req, action, detail) {
+  wallet.logLedger('admin_action', { action, detail: detail || null, ip: clientIp(req) });
+}
+
 /**
  *   GET  /admin                    -> the admin page
  *   GET  /admin/api/status         -> balances, solvency, limits, unsettled withdrawals, recent ledger
  *   POST /admin/api/pause { paused, reason? } -> stop / resume buy-ins and withdrawals
  *   POST /admin/api/withdraw-earnings { solAmount, idempotencyKey } -> sends collected house fees to OWNER_ADDRESS
  *   POST /admin/api/test-alert     -> sends a test message to ALERT_WEBHOOK_URL
+ *   POST /admin/api/settings { changes:{key:value} } -> change limits, the fee, the cash-out hold (bounded, logged)
+ *   POST /admin/api/kick { snakeId, forfeit? }       -> remove a player from the game (pays out, or forfeits)
+ *   POST /admin/api/ban { owner, reason? } / POST /admin/api/unban { owner } -> block / allow a wallet from buying in
  */
 async function handleAdmin(req, res) {
   const url = new URL(req.url, 'http://localhost');
@@ -295,19 +335,53 @@ async function handleAdmin(req, res) {
     if (route === 'GET /admin/api/status') {
       const status = await wallet.getAdminStatus();
       status.world = { realPlayers: realWorld.snakes.size, inPlayCredits: realWorld.totalValue(), inPlaySol: realWorld.totalValue() / wallet.CREDITS_PER_SOL, practicePlayers: practiceWorld.snakes.size };
+      status.live = livePlayers();
       sendJson(res, 200, status);
     } else if (route === 'POST /admin/api/pause') {
       const body = await readJson(req, 2048);
+      audit(req, body.paused ? 'pause' : 'resume', body.paused ? String(body.reason || 'manual').slice(0, 200) : null);
       sendJson(res, 200, wallet.setPaused(!!body.paused, body.reason, 'admin'));
+    } else if (route === 'POST /admin/api/settings') {
+      if (rateLimited('admin-actions', clientIp(req), 60, 60000)) throw new wallet.WalletError('rate_limited', 'Too many requests', 429);
+      const body = await readJson(req, 2048);
+      const settings = wallet.updateSettings(body.changes, 'admin');
+      applyCashoutHold();
+      audit(req, 'settings', JSON.stringify(body.changes));
+      sendJson(res, 200, { ok: true, settings });
+    } else if (route === 'POST /admin/api/kick') {
+      if (rateLimited('admin-actions', clientIp(req), 60, 60000)) throw new wallet.WalletError('rate_limited', 'Too many requests', 429);
+      const body = await readJson(req, 2048);
+      const forfeit = body.forfeit === true;
+      const done = kickSnake(String(body.snakeId || ''), forfeit);
+      audit(req, forfeit ? 'kick (forfeit)' : 'kick (pay out)', String(body.snakeId || '').slice(0, 40) + (done ? '' : ' - not found'));
+      if (!done) throw new wallet.WalletError('not_found', 'That player is no longer in the game', 404);
+      sendJson(res, 200, { ok: true });
+    } else if (route === 'POST /admin/api/ban') {
+      if (rateLimited('admin-actions', clientIp(req), 60, 60000)) throw new wallet.WalletError('rate_limited', 'Too many requests', 429);
+      const body = await readJson(req, 2048);
+      const owner = String(body.owner || '');
+      wallet.banWallet(owner, body.reason, 'admin');
+      audit(req, 'ban', owner + ' - ' + String(body.reason || 'no reason given').slice(0, 200));
+      // A banned wallet is also taken out of any game it is in, paid out for what its snake is worth.
+      for (const p of livePlayers()) if (p.owner === owner) kickSnake(p.snakeId, false);
+      sendJson(res, 200, { ok: true });
+    } else if (route === 'POST /admin/api/unban') {
+      if (rateLimited('admin-actions', clientIp(req), 60, 60000)) throw new wallet.WalletError('rate_limited', 'Too many requests', 429);
+      const body = await readJson(req, 2048);
+      wallet.unbanWallet(String(body.owner || ''), 'admin');
+      audit(req, 'unban', String(body.owner || ''));
+      sendJson(res, 200, { ok: true });
     } else if (route === 'POST /admin/api/withdraw-earnings') {
       // The destination is OWNER_ADDRESS from the environment; the request only says how much.
       if (rateLimited('admin-earnings', clientIp(req), 10, 60000)) throw new wallet.WalletError('rate_limited', 'Too many requests', 429);
       const body = await readJson(req, 2048);
+      audit(req, 'withdraw earnings', String(body.solAmount) + ' SOL');
       const r = await wallet.withdrawEarnings(body.solAmount, body.idempotencyKey);
       if (r.status === 'completed') sendJson(res, 200, Object.assign({ ok: true }, r));
       else if (r.status === 'refunded') sendJson(res, 502, Object.assign({ ok: false }, r));
       else sendJson(res, 202, Object.assign({ ok: false }, r, { error: 'Still processing — it will settle on its own' }));
     } else if (route === 'POST /admin/api/test-alert') {
+      audit(req, 'test alert', null);
       wallet.sendAlert('test-alert', 'Test alert from the admin page', 0);
       sendJson(res, 200, { ok: true, configured: !!process.env.ALERT_WEBHOOK_URL });
     } else {
@@ -475,6 +549,10 @@ function handleMessage(connId, msg) {
       }
       if (typeof msg.walletId === 'string') {
         walletId = msg.walletId;
+        if (wallet.isBanned(walletId)) {
+          session.conn.send({ t: 'error', message: 'This wallet is not allowed to play. You can still withdraw your balance.' });
+          return;
+        }
         try {
           wallet.assertCanBuyIn(buyin);
           wallet.deductPlayer(walletId, buyin / wallet.CREDITS_PER_SOL);
@@ -624,6 +702,7 @@ httpServer.listen(PORT, () => {
   if (ORIGIN_SECRET) console.log('[security] ORIGIN_SECRET set: only requests carrying it (and /health) are served');
   wallet.setInPlayProvider(() => realWorld.totalValue());
   wallet.init();
+  applyCashoutHold();
   if (practiceWorld.botCount > 0) {
     console.log('[game] NUM_BOTS applies to practice play only — the real-money world never has bots');
   }

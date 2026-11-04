@@ -79,7 +79,9 @@ const ALERT_URL = process.env.ALERT_WEBHOOK_URL || '';
 
 // The house fee: this percent of a cash-out's PROFIT (what it is worth above the buy-in). Cashing out
 // at or below the buy-in costs nothing, and the stake itself is never touched. 0 turns it off.
-const RAKE_PERCENT = (() => { const n = Number(process.env.RAKE_PERCENT); return Number.isFinite(n) && n >= 0 && n <= 50 ? n : 5; })();
+let RAKE_PERCENT = (() => { const n = Number(process.env.RAKE_PERCENT); return Number.isFinite(n) && n >= 0 && n <= 50 ? n : 5; })();
+// How long a cash-out must be held (seconds). index.js copies it onto the game; the admin page can change it.
+let cashoutHoldSec = process.env.CASHOUT_HOLD_SECONDS !== undefined && Number.isFinite(Number(process.env.CASHOUT_HOLD_SECONDS)) ? Number(process.env.CASHOUT_HOLD_SECONDS) : 5;
 
 // The only address house earnings can ever be sent to. It comes from the environment, never from a request,
 // so someone who got hold of the admin token still cannot redirect the money anywhere else.
@@ -112,7 +114,7 @@ let polling = false;
 
 // Persisted. players[playerId] = { owner, address, lamports, lastSig, needsSweep, createdAt }
 // withdrawals[`${playerId}:${idempotencyKey}`] = { ..., status: pending|sending|completed|refunded }
-let store = { version: 1, players: {}, processedSignatures: [], withdrawals: {}, paused: null, feesLamports: 0, rakeLamports: 0, earningsTakenLamports: 0 };
+let store = { version: 1, players: {}, processedSignatures: [], withdrawals: {}, paused: null, feesLamports: 0, rakeLamports: 0, earningsTakenLamports: 0, settings: {}, banned: {} };
 let earningsBusy = false;               // one earnings withdrawal at a time
 const GENESIS_NETWORKS = {
   'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG': 'devnet',
@@ -147,8 +149,11 @@ function loadStore() {
     feesLamports: parsed.feesLamports || 0,
     rakeLamports: parsed.rakeLamports || 0,
     earningsTakenLamports: parsed.earningsTakenLamports || 0,
+    settings: parsed.settings || {},
+    banned: parsed.banned || {},
   };
   for (const sig of store.processedSignatures) processed.add(sig);
+  applyStoredSettings();
 }
 
 function save() {
@@ -201,6 +206,141 @@ function setPaused(paused, reason, by) {
   ledger(paused ? 'paused' : 'resumed', { reason: store.paused ? store.paused.reason : null, by: by || 'admin' });
   sendAlert('pause-toggle:' + paused, paused ? 'PAUSED (' + (reason || 'manual') + ')' : 'Resumed', 0);
   return getPauseInfo();
+}
+
+/* ============================== admin settings / bans ============================== */
+
+// What the admin page may change while the game runs. Each setting has hard bounds, so even a stolen admin
+// token cannot raise a limit past them (the environment variables set the starting values, not these bounds).
+const SETTING_DEFS = {
+  maxBuyinCredits:   { label: 'Max buy-in ($ credits)',       min: 1,     max: 500, get: () => LIMITS.maxBuyinCredits,                            set: (v) => { LIMITS.maxBuyinCredits = v; } },
+  maxWithdrawSol:    { label: 'Per withdrawal (SOL)',          min: 0.001, max: 5,   get: () => lamportsToSol(LIMITS.maxWithdrawLamports),          set: (v) => { LIMITS.maxWithdrawLamports = solToLamports(v); } },
+  maxPlayerDailySol: { label: 'Per player per day (SOL)',      min: 0.001, max: 10,  get: () => lamportsToSol(LIMITS.maxPlayerDailyLamports),       set: (v) => { LIMITS.maxPlayerDailyLamports = solToLamports(v); } },
+  maxGlobalDailySol: { label: 'All players per day (SOL)',     min: 0.001, max: 50,  get: () => lamportsToSol(LIMITS.maxGlobalDailyLamports),       set: (v) => { LIMITS.maxGlobalDailyLamports = solToLamports(v); } },
+  lowWalletSol:      { label: 'Low-wallet alert at (SOL)',     min: 0.001, max: 100, get: () => lamportsToSol(LIMITS.lowWalletLamports),            set: (v) => { LIMITS.lowWalletLamports = solToLamports(v); } },
+  rakePercent:       { label: 'House fee (% of profit)',       min: 0,     max: 20,  get: () => RAKE_PERCENT,                                       set: (v) => { RAKE_PERCENT = v; } },
+  cashoutHoldSec:    { label: 'Cash-out hold (seconds)',       min: 0,     max: 30,  get: () => cashoutHoldSec,                                     set: (v) => { cashoutHoldSec = v; } },
+};
+
+function currentSettings() {
+  const out = {};
+  for (const [k, d] of Object.entries(SETTING_DEFS)) out[k] = d.get();
+  return out;
+}
+/** Current values with their labels and bounds, for the admin page. */
+function getSettings() {
+  const out = {};
+  for (const [k, d] of Object.entries(SETTING_DEFS)) out[k] = { value: d.get(), min: d.min, max: d.max, label: d.label };
+  return out;
+}
+function limitsConsistent(s) { return s.maxWithdrawSol <= s.maxPlayerDailySol && s.maxPlayerDailySol <= s.maxGlobalDailySol; }
+
+/** Re-apply the saved settings on start-up. A saved value that no longer fits its bounds is ignored. */
+function applyStoredSettings() {
+  const saved = store.settings || {};
+  const next = Object.assign(currentSettings(), {});
+  for (const [k, v] of Object.entries(saved)) {
+    const d = SETTING_DEFS[k];
+    if (d && Number.isFinite(v) && v >= d.min && v <= d.max) next[k] = v;
+  }
+  if (!limitsConsistent(next)) return;
+  for (const [k, d] of Object.entries(SETTING_DEFS)) if (next[k] !== d.get()) d.set(next[k]);
+}
+
+/** Change one or more settings. All or nothing; every change is logged and announced on the alert channel. */
+function updateSettings(changes, by) {
+  requireEnabled();
+  if (!changes || typeof changes !== 'object' || Array.isArray(changes) || !Object.keys(changes).length) throw new WalletError('bad_setting', 'No settings given');
+  const before = currentSettings();
+  const next = Object.assign({}, before);
+  for (const [k, raw] of Object.entries(changes)) {
+    const d = SETTING_DEFS[k];
+    if (!d) throw new WalletError('bad_setting', 'Unknown setting: ' + k);
+    const v = Number(raw);
+    if (raw === '' || raw === null || !Number.isFinite(v) || v < d.min || v > d.max) throw new WalletError('bad_setting', d.label + ' must be between ' + d.min + ' and ' + d.max);
+    next[k] = v;
+  }
+  if (!limitsConsistent(next)) throw new WalletError('bad_setting', 'Per withdrawal must not exceed per player per day, which must not exceed all players per day');
+  const diff = {};
+  for (const k of Object.keys(changes)) {
+    if (next[k] === before[k]) continue;
+    diff[k] = { from: before[k], to: next[k] };
+    SETTING_DEFS[k].set(next[k]);
+    store.settings[k] = next[k];
+  }
+  if (!Object.keys(diff).length) return getSettings();
+  save();
+  ledger('settings_changed', { changes: diff, by: by || 'admin' });
+  sendAlert('settings-changed', 'Settings changed from the admin page: ' + Object.entries(diff).map(([k, c]) => SETTING_DEFS[k].label + ' ' + c.from + ' -> ' + c.to).join('; '), 0);
+  return getSettings();
+}
+
+function ownerOf(playerId) { const p = store.players[playerId]; return p ? p.owner : null; }
+/** A banned wallet can still sign in, see its balance and withdraw; it just cannot buy in. */
+function isBanned(playerId) { const o = ownerOf(playerId); return !!(o && store.banned[o]); }
+function banWallet(owner, reason, by) {
+  requireEnabled();
+  if (!Object.values(store.players).some((p) => p.owner === owner)) throw new WalletError('unknown_wallet', 'No player has that wallet address', 404);
+  store.banned[owner] = { at: Date.now(), reason: String(reason || 'no reason given').slice(0, 200), by: by || 'admin' };
+  save();
+  ledger('wallet_banned', { owner, reason: store.banned[owner].reason, by: by || 'admin' });
+  sendAlert('wallet-banned:' + owner, 'Wallet banned from playing: ' + owner.slice(0, 4) + '…' + owner.slice(-4) + ' (' + store.banned[owner].reason + ')', 0);
+  return store.banned[owner];
+}
+function unbanWallet(owner, by) {
+  requireEnabled();
+  if (!store.banned[owner]) throw new WalletError('not_banned', 'That wallet is not banned', 404);
+  delete store.banned[owner];
+  save();
+  ledger('wallet_unbanned', { owner, by: by || 'admin' });
+  return true;
+}
+function listBans() {
+  return Object.entries(store.banned).map(([owner, b]) => ({ owner, at: b.at, reason: b.reason, by: b.by })).sort((a, b) => b.at - a.at);
+}
+
+/** Parsed ledger lines. Only the last MAX bytes are read, so a very old, large file cannot slow the admin page down. */
+function readLedgerEntries() {
+  const MAX = 20 * 1024 * 1024;
+  let text = '';
+  try {
+    const fd = fs.openSync(LEDGER_FILE, 'r');
+    try {
+      const size = fs.fstatSync(fd).size;
+      const len = Math.min(size, MAX);
+      const buf = Buffer.alloc(len);
+      fs.readSync(fd, buf, 0, len, size - len);
+      text = buf.toString('utf8');
+      if (size > MAX) text = text.slice(text.indexOf('\n') + 1); // drop the line cut in half
+    } finally { fs.closeSync(fd); }
+  } catch (e) { return []; }
+  const out = [];
+  for (const l of text.split('\n')) { if (!l) continue; try { out.push(JSON.parse(l)); } catch (e) { out.push({ raw: l }); } }
+  return out;
+}
+
+/** Activity per day (UTC) for the last `days` days, and all-time counts, from the ledger. */
+function dailyStats(entries, days) {
+  const byDay = new Map();
+  const dayKey = (ts) => String(ts).slice(0, 10);
+  const get = (k) => { if (!byDay.has(k)) byDay.set(k, { date: k, games: 0, volumeSol: 0, cashouts: 0, feesSol: 0, depositsSol: 0, withdrawnSol: 0, newPlayers: 0, players: new Set() }); return byDay.get(k); };
+  let games = 0, volumeSol = 0;
+  for (const e of entries) {
+    if (!e.ts || !e.type) continue;
+    const d = get(dayKey(e.ts));
+    if (e.type === 'buyin') { d.games++; d.volumeSol += (e.credits || 0) / CREDITS_PER_SOL; if (e.walletId) d.players.add(e.walletId); games++; volumeSol += (e.credits || 0) / CREDITS_PER_SOL; }
+    else if (e.type === 'cashout') { d.cashouts++; d.feesSol += (e.feeCredits || 0) / CREDITS_PER_SOL; }
+    else if (e.type === 'deposit') d.depositsSol += e.sol || 0;
+    else if (e.type === 'withdraw_ok') d.withdrawnSol += (e.lamports || 0) / LAMPORTS_PER_SOL;
+    else if (e.type === 'player_registered') d.newPlayers++;
+  }
+  const out = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const k = new Date(Date.now() - i * DAY_MS).toISOString().slice(0, 10);
+    const d = byDay.get(k) || get(k);
+    out.push({ date: k, games: d.games, volumeSol: d.volumeSol, cashouts: d.cashouts, feesSol: d.feesSol, depositsSol: d.depositsSol, withdrawnSol: d.withdrawnSol, newPlayers: d.newPlayers, activePlayers: d.players.size });
+  }
+  return { days: out, totalGames: games, totalVolumeSol: volumeSol };
 }
 
 /* ============================== conversions / helpers ============================== */
@@ -483,11 +623,10 @@ async function getAdminStatus() {
     .filter((r) => r.status === 'pending' || r.status === 'sending')
     .map((r) => ({ kind: r.kind || 'player', to: r.to, sol: lamportsToSol(r.lamports), status: r.status, signature: r.signature, ageSec: Math.round((Date.now() - r.createdAt) / 1000) }));
 
-  let recent = [];
-  try {
-    const lines = fs.readFileSync(LEDGER_FILE, 'utf8').split('\n').filter(Boolean);
-    recent = lines.slice(-60).reverse().map((l) => { try { return JSON.parse(l); } catch (e) { return { raw: l }; } });
-  } catch (e) { /* no ledger yet */ }
+  const entries = readLedgerEntries();
+  const recent = entries.slice(-60).reverse();
+  const audit = entries.filter((e) => e.type === 'admin_action').slice(-100).reverse();
+  const activity = dailyStats(entries, 14);
 
   return {
     network,
@@ -531,6 +670,10 @@ async function getAdminStatus() {
     unsettledWithdrawals: unsettled,
     players,
     recent,
+    audit,
+    activity,
+    settings: getSettings(),
+    bans: listBans(),
   };
 }
 
@@ -1061,6 +1204,12 @@ module.exports = {
   assertCanBuyIn,
   setInPlayProvider,
   getAdminStatus,
+  getSettings,
+  updateSettings,
+  ownerOf,
+  isBanned,
+  banWallet,
+  unbanWallet,
   isPaused,
   getPauseInfo,
   setPaused,
