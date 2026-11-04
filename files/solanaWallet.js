@@ -86,6 +86,11 @@ let cashoutHoldSec = envSeconds('CASHOUT_HOLD_SECONDS', 5);
 let minPlaySec = envSeconds('MIN_PLAY_SECONDS', 10);          // a snake must have played this long before it can start a cash-out
 let spawnProtectSec = envSeconds('SPAWN_PROTECT_SECONDS', 3); // a new snake cannot be killed (or kill) for this long
 
+// Skins. The index is what the game sends around; it must match the client's SKINS list and SKIN_COUNT in
+// gameServer.js. Common skins are free for everyone; the others are bought once, with balance, and kept per wallet.
+const SKIN_TIERS = ['common', 'common', 'common', 'rare', 'rare', 'epic', 'epic', 'legendary', 'legendary'];
+const skinPriceSol = { rare: 0.03, epic: 0.08, legendary: 0.25 }; // admin settings change these
+
 // The only address house earnings can ever be sent to. It comes from the environment, never from a request,
 // so someone who got hold of the admin token still cannot redirect the money anywhere else.
 const OWNER_ADDRESS = (() => {
@@ -117,7 +122,7 @@ let polling = false;
 
 // Persisted. players[playerId] = { owner, address, lamports, lastSig, needsSweep, createdAt }
 // withdrawals[`${playerId}:${idempotencyKey}`] = { ..., status: pending|sending|completed|refunded }
-let store = { version: 1, players: {}, processedSignatures: [], withdrawals: {}, paused: null, feesLamports: 0, rakeLamports: 0, earningsTakenLamports: 0, settings: {}, banned: {} };
+let store = { version: 1, players: {}, processedSignatures: [], withdrawals: {}, paused: null, feesLamports: 0, rakeLamports: 0, earningsTakenLamports: 0, settings: {}, banned: {}, skinSalesLamports: 0 };
 let earningsBusy = false;               // one earnings withdrawal at a time
 const GENESIS_NETWORKS = {
   'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG': 'devnet',
@@ -154,6 +159,7 @@ function loadStore() {
     earningsTakenLamports: parsed.earningsTakenLamports || 0,
     settings: parsed.settings || {},
     banned: parsed.banned || {},
+    skinSalesLamports: parsed.skinSalesLamports || 0,
   };
   for (const sig of store.processedSignatures) processed.add(sig);
   applyStoredSettings();
@@ -225,6 +231,9 @@ const SETTING_DEFS = {
   cashoutHoldSec:    { label: 'Cash-out hold (seconds)',       min: 0,     max: 30,  get: () => cashoutHoldSec,                                     set: (v) => { cashoutHoldSec = v; } },
   minPlaySec:        { label: 'Play before cash-out (seconds)', min: 0,    max: 120, get: () => minPlaySec,                                         set: (v) => { minPlaySec = v; } },
   spawnProtectSec:   { label: 'Spawn protection (seconds)',    min: 0,     max: 10,  get: () => spawnProtectSec,                                    set: (v) => { spawnProtectSec = v; } },
+  skinPriceRare:      { label: 'Rare skin price (SOL)',         min: 0.001, max: 5,   get: () => skinPriceSol.rare,                                  set: (v) => { skinPriceSol.rare = v; } },
+  skinPriceEpic:      { label: 'Epic skin price (SOL)',         min: 0.001, max: 5,   get: () => skinPriceSol.epic,                                  set: (v) => { skinPriceSol.epic = v; } },
+  skinPriceLegendary: { label: 'Legendary skin price (SOL)',    min: 0.001, max: 10,  get: () => skinPriceSol.legendary,                             set: (v) => { skinPriceSol.legendary = v; } },
 };
 
 function currentSettings() {
@@ -280,6 +289,39 @@ function updateSettings(changes, by) {
   return getSettings();
 }
 
+/* ---- skins ---- */
+const skinIndexOk = (i) => Number.isInteger(i) && i >= 0 && i < SKIN_TIERS.length;
+function getSkinPrices() { return { rare: skinPriceSol.rare, epic: skinPriceSol.epic, legendary: skinPriceSol.legendary }; }
+function skinTier(i) { return skinIndexOk(i) ? SKIN_TIERS[i] : null; }
+/** Paid skins this wallet owns (indexes). Common skins are free and not listed. */
+function ownedSkins(playerId) { const p = requirePlayer(playerId); return (p.skins || []).slice().sort((a, b) => a - b); }
+/** Free skins can be used by anyone; paid ones only by the wallet that bought them. */
+function canUseSkin(playerId, i) {
+  if (!skinIndexOk(i)) return false;
+  if (SKIN_TIERS[i] === 'common') return true;
+  const p = store.players[playerId];
+  return !!(p && (p.skins || []).includes(i));
+}
+/** Buy a skin from the player's balance. The price stays in the game wallet as house income (and counts as earnings). */
+function buySkin(playerId, i) {
+  const player = requirePlayer(playerId);
+  if (isPaused()) throw new WalletError('paused', 'Purchases are paused right now. Your balance is safe.', 503);
+  if (!skinIndexOk(i)) throw new WalletError('bad_skin', 'Unknown skin', 400);
+  const tier = SKIN_TIERS[i];
+  if (tier === 'common') throw new WalletError('free_skin', 'That skin is free', 400);
+  player.skins = player.skins || [];
+  if (player.skins.includes(i)) throw new WalletError('already_owned', 'You already own this skin', 409);
+  const lamports = solToLamports(skinPriceSol[tier]);
+  if (lamports > player.lamports) throw new WalletError('insufficient_balance', 'Not enough balance for this skin. Deposit more SOL first.', 402);
+  player.lamports -= lamports;
+  store.rakeLamports += lamports;        // house income, withdrawable with the other earnings
+  store.skinSalesLamports += lamports;   // and counted on its own for the admin page
+  player.skins.push(i);
+  save();
+  ledger('skin_purchase', { walletId: playerId, skin: i, tier, lamports, sol: lamportsToSol(lamports) });
+  return { owned: ownedSkins(playerId), balance: balanceOf(player) };
+}
+
 function ownerOf(playerId) { const p = store.players[playerId]; return p ? p.owner : null; }
 /** A banned wallet can still sign in, see its balance and withdraw; it just cannot buy in. */
 function isBanned(playerId) { const o = ownerOf(playerId); return !!(o && store.banned[o]); }
@@ -328,7 +370,7 @@ function readLedgerEntries() {
 function dailyStats(entries, days) {
   const byDay = new Map();
   const dayKey = (ts) => String(ts).slice(0, 10);
-  const get = (k) => { if (!byDay.has(k)) byDay.set(k, { date: k, games: 0, volumeSol: 0, cashouts: 0, feesSol: 0, depositsSol: 0, withdrawnSol: 0, newPlayers: 0, players: new Set() }); return byDay.get(k); };
+  const get = (k) => { if (!byDay.has(k)) byDay.set(k, { date: k, games: 0, volumeSol: 0, cashouts: 0, feesSol: 0, depositsSol: 0, withdrawnSol: 0, newPlayers: 0, skinsSol: 0, players: new Set() }); return byDay.get(k); };
   let games = 0, volumeSol = 0;
   for (const e of entries) {
     if (!e.ts || !e.type) continue;
@@ -338,12 +380,13 @@ function dailyStats(entries, days) {
     else if (e.type === 'deposit') d.depositsSol += e.sol || 0;
     else if (e.type === 'withdraw_ok') d.withdrawnSol += (e.lamports || 0) / LAMPORTS_PER_SOL;
     else if (e.type === 'player_registered') d.newPlayers++;
+    else if (e.type === 'skin_purchase') d.skinsSol += e.sol || 0;
   }
   const out = [];
   for (let i = days - 1; i >= 0; i--) {
     const k = new Date(Date.now() - i * DAY_MS).toISOString().slice(0, 10);
     const d = byDay.get(k) || get(k);
-    out.push({ date: k, games: d.games, volumeSol: d.volumeSol, cashouts: d.cashouts, feesSol: d.feesSol, depositsSol: d.depositsSol, withdrawnSol: d.withdrawnSol, newPlayers: d.newPlayers, activePlayers: d.players.size });
+    out.push({ date: k, games: d.games, volumeSol: d.volumeSol, cashouts: d.cashouts, feesSol: d.feesSol, depositsSol: d.depositsSol, withdrawnSol: d.withdrawnSol, newPlayers: d.newPlayers, skinsSol: d.skinsSol, activePlayers: d.players.size });
   }
   return { days: out, totalGames: games, totalVolumeSol: volumeSol };
 }
@@ -667,6 +710,7 @@ async function getAdminStatus() {
       reserveSol: lamportsToSol(EARNINGS_RESERVE_LAMPORTS),
       ownerAddress: OWNER_ADDRESS,
       rakePercent: RAKE_PERCENT,
+      skinSalesSol: lamportsToSol(store.skinSalesLamports || 0), // included in "fees collected"
       networkCostsSol: lamportsToSol(store.feesLamports),
     },
     withdrawnLast24hSol: lamportsToSol(out.total),
@@ -1211,6 +1255,10 @@ module.exports = {
   getAdminStatus,
   getSettings,
   updateSettings,
+  getSkinPrices,
+  ownedSkins,
+  canUseSkin,
+  buySkin,
   ownerOf,
   isBanned,
   banWallet,

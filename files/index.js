@@ -43,7 +43,7 @@ const net = require('net');
 const fs = require('fs');
 const path = require('path');
 const { attachWebSocketServer } = require('./wsProtocol');
-const { GameWorld, CFG } = require('./gameServer');
+const { GameWorld, CFG, SKIN_COUNT } = require('./gameServer');
 const wallet = require('./solanaWallet');
 
 const PORT = process.env.PORT || 8787;
@@ -172,12 +172,12 @@ async function handleApi(req, res) {
   try {
     const url = new URL(req.url, 'http://localhost');
     const route = req.method + ' ' + url.pathname;
-    const known = ['GET /api/config', 'GET /api/online', 'GET /api/login-challenge', 'POST /api/login', 'GET /api/player-deposit-address', 'GET /api/player-balance', 'POST /api/check-deposit', 'POST /api/withdraw'];
+    const known = ['GET /api/config', 'GET /api/online', 'GET /api/login-challenge', 'POST /api/login', 'GET /api/player-deposit-address', 'GET /api/player-balance', 'POST /api/check-deposit', 'POST /api/withdraw', 'GET /api/skins', 'POST /api/buy-skin'];
     if (!known.includes(route)) { sendJson(res, 404, { error: 'Not found.' }); return; }
 
     // Public and harmless: lets the page say "Devnet" or not before anyone connects a wallet.
     if (route === 'GET /api/config') {
-      sendJson(res, 200, { enabled: wallet.isEnabled(), network: wallet.getNetwork(), creditsPerSol: wallet.CREDITS_PER_SOL, paused: wallet.isEnabled() ? wallet.isPaused() : false });
+      sendJson(res, 200, { enabled: wallet.isEnabled(), network: wallet.getNetwork(), creditsPerSol: wallet.CREDITS_PER_SOL, paused: wallet.isEnabled() ? wallet.isPaused() : false, skinPrices: wallet.getSkinPrices() });
       return;
     }
     // Public: the "playing now" counter on the main screen. Just a number, no names or balances.
@@ -224,6 +224,19 @@ async function handleApi(req, res) {
     if (route === 'GET /api/player-balance') {
       if (rateLimited('read', playerId, 60, 60000)) throw new wallet.WalletError('rate_limited', 'Too many requests', 429);
       sendJson(res, 200, Object.assign(balanceBody(wallet.getPlayerBalance(playerId)), { paused: wallet.isPaused() }));
+      return;
+    }
+
+    if (route === 'GET /api/skins') {
+      if (rateLimited('read', playerId, 60, 60000)) throw new wallet.WalletError('rate_limited', 'Too many requests', 429);
+      sendJson(res, 200, { owned: wallet.ownedSkins(playerId), prices: wallet.getSkinPrices() });
+      return;
+    }
+
+    if (route === 'POST /api/buy-skin') {
+      if (rateLimited('buy-skin', playerId, 10, 60000)) throw new wallet.WalletError('rate_limited', 'Too many requests', 429);
+      const r = wallet.buySkin(playerId, body.skin);
+      sendJson(res, 200, Object.assign({ ok: true, owned: r.owned }, balanceBody(r.balance)));
       return;
     }
 
@@ -536,7 +549,7 @@ function handleMessage(connId, msg) {
       if (session.playerId) return; // already joined
       const name = cleanName(msg.name);
       const buyin = clampNum(msg.buyin, CFG.MIN_BUYIN, CFG.MAX_BUYIN, CFG.DEFAULT_BUYIN);
-      const skinIndex = Number.isInteger(msg.skinIndex) ? Math.max(0, Math.min(13, msg.skinIndex)) : 0; // 14 skins
+      let skinIndex = Number.isInteger(msg.skinIndex) ? Math.max(0, Math.min(SKIN_COUNT - 1, msg.skinIndex)) : 0;
       const playerId = connId; // reuse the connection id as the snake id — simple and unique
 
       // Real-balance play: the buy-in comes out of the server-side balance, never
@@ -555,6 +568,7 @@ function handleMessage(connId, msg) {
           session.conn.send({ t: 'error', message: 'This wallet is not allowed to play. You can still withdraw your balance.' });
           return;
         }
+        if (!wallet.canUseSkin(walletId, skinIndex)) skinIndex = 0; // a paid skin this wallet does not own: play with the default
         try {
           wallet.assertCanBuyIn(buyin);
           wallet.deductPlayer(walletId, buyin / wallet.CREDITS_PER_SOL);
