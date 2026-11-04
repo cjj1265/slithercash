@@ -261,7 +261,7 @@ async function handleApi(req, res) {
       if (w.posted) throw new wallet.WalletError('already_posted', 'That win is already posted', 409);
       const profit = w.net - w.buyin; // credits
       const minSol = wallet.getSettings().winPostMinSol.value;
-      if (profit < minSol * wallet.CREDITS_PER_SOL - 1e-9) throw new wallet.WalletError('too_small', 'Wins under ' + minSol + ' SOL are not posted', 400);
+      if (profit < minSol * wallet.CREDITS_PER_SOL - 1e-9) throw new wallet.WalletError('too_small', 'Cash-outs with less than ' + minSol + ' SOL profit are not posted', 400);
       w.posted = true; // set first, so a double click cannot post twice
       const real = wallet.getNetwork() === 'mainnet-beta';
       const unit = real ? 1 / wallet.CREDITS_PER_SOL : 1; // SOL on mainnet, play money elsewhere
@@ -691,8 +691,8 @@ function drainEvents(world) {
           const r = wallet.settleCashout(walletId, evt.data.amount, stake.buyin);
           evt.data.fee = r.feeCredits;
           evt.data.net = r.netCredits;
-          // A winning cash-out can be posted to the #wins channel: give the player an id for exactly this win.
-          if (wins.enabled() && r.netCredits > stake.buyin + 1e-9) evt.data.winId = rememberWin(walletId, evt.data.name, stake.buyin, r.netCredits);
+          // Any cash-out can be posted to the #wins channel (the admin minimum decides which): give the player an id for exactly this one.
+          if (wins.enabled()) evt.data.winId = rememberWin(walletId, evt.data.name, stake.buyin, r.netCredits);
         } catch (e) {
           console.error('[wallet] FAILED to credit cash-out of ' + evt.data.amount + ' credits to ' + walletId + ':', e.message);
         }

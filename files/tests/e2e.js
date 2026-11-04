@@ -619,8 +619,8 @@ const errOf = (state) => (state.msgs.find((m) => m.t === 'error') || {}).message
       check('an unknown win id is refused', (await http_('POST', '/api/post-win', { winId: 'ab'.repeat(12) }, HD)).status === 404);
       await admin('POST', '/admin/api/settings', { changes: { winPostMinSol: 5 } });
       const small = await http_('POST', '/api/post-win', { winId: win.winId }, HD);
-      check('a win under the admin minimum is refused', small.status === 400 && small.json.code === 'too_small' && winPosts.length === 0, small);
-      await admin('POST', '/admin/api/settings', { changes: { winPostMinSol: 0.001 } });
+      check('a cash-out under the admin minimum is refused', small.status === 400 && small.json.code === 'too_small' && winPosts.length === 0, small);
+      await admin('POST', '/admin/api/settings', { changes: { winPostMinSol: -5 } }); // the default: every cash-out can be posted
       const posted = await http_('POST', '/api/post-win', { winId: win.winId }, HD);
       check('the winner can post it', posted.status === 200 && posted.json.ok === true, posted);
       const up = winPosts[0];
@@ -632,6 +632,18 @@ const errOf = (state) => (state.msgs.find((m) => m.t === 'error') || {}).message
       check('posting the same win twice is refused', (await http_('POST', '/api/post-win', { winId: win.winId }, HD)).status === 409 && winPosts.length === 1);
       const ledgerPost = fs.readFileSync(feeData + '.ledger.jsonl', 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((e) => e.type === 'win_posted');
       check('the post is in the ledger', ledgerPost.length === 1);
+
+      // a cash-out with no profit can be posted too, and a loss is drawn in red
+      const d2 = await wsOpen(pidD, 2);
+      const even = await wsCashout(d2);
+      check('a break-even cash-out also gets an id', even && typeof even.winId === 'string' && even.winId.length >= 16, even);
+      const postedEven = await http_('POST', '/api/post-win', { winId: even.winId }, HD);
+      const textEven = winPosts[1] ? winPosts[1].body.toString('latin1') : '';
+      check('a break-even cash-out can be posted, labelled as a cash-out', postedEven.status === 200 && winPosts.length === 2 && /verified cash-out/.test(textEven) && /\+[^0-9]{0,3}0\.000/.test(textEven), textEven.slice(0, 260));
+      d2.ws.close();
+      const { renderWinCard } = require('../winCard');
+      const lossPng = renderWinCard({ profit: -0.002, pct: -4, invested: 0.05, position: 0.048, name: 'Loser', sym: 'sol' });
+      check('a cash-out at a loss also draws (a 1100 x 640 PNG)', lossPng.readUInt32BE(16) === 1100 && lossPng.readUInt32BE(20) === 640 && lossPng[1] === 0x50);
     }
   }
   c.ws.close(); d.ws.close();
