@@ -259,6 +259,7 @@
     display:flex; align-items:center; justify-content:center; font-family:'JetBrains Mono',monospace; font-size:12px; font-weight:800; flex-shrink:0;
   }
   #cashOutBtn{ touch-action:none; user-select:none; -webkit-user-select:none; --hold:0%; }
+  #cashOutBtn.locked{ opacity:0.55; cursor:not-allowed; animation:none; }
   #cashOutBtn::before{ content:""; position:absolute; top:0; left:0; bottom:0; width:var(--hold); background:rgba(36,26,8,0.28); pointer-events:none; }
   #cashOutBtn .co-icon, #cashOutBtn .co-text{ position:relative; z-index:1; }
   #cashOutBtn.armed{ background:linear-gradient(180deg, #ff8f8f, var(--ruby)); box-shadow:0 5px 0 var(--ruby-deep), 0 12px 22px rgba(0,0,0,0.4); }
@@ -507,7 +508,7 @@
     </div>
 
     <button class="btn btn-gold" id="playBtn">Buy In &amp; Play</button>
-    <div class="hint">Move mouse / drag to steer &middot; hold click, space, or BOOST to speed up &middot; hold Cash Out (or C) for 5 seconds to cash out</div>
+    <div class="hint">Move mouse / drag to steer &middot; hold click, space, or BOOST to speed up &middot; hold Cash Out (or C) to cash out &middot; new snakes are safe for the first few seconds</div>
   </div>
 
   <button type="button" class="choose-snake-btn" id="chooseSnakeBtn">
@@ -1268,6 +1269,22 @@ function drawColorBands(pctx, pts, colors, r, timeShift, bandLenOverride){
 }
 
 function drawSnake(snake){
+  drawSnakeBody(snake);
+  if(snake.prot){
+    // a pulsing ring around the head while the snake cannot be hurt
+    const h = worldToScreen(snake.head.x, snake.head.y);
+    const r = radiusFor(snake) * camera.zoom;
+    const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 140);
+    ctx.save();
+    ctx.beginPath(); ctx.arc(h.x, h.y, r * 2.1 + pulse * 3, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(120,220,255,' + (0.45 + 0.4 * pulse) + ')';
+    ctx.lineWidth = Math.max(2, r * 0.22);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+function drawSnakeBody(snake){
   const pts = snake.points;
   if(pts.length<2) return;
   const r = radiusFor(snake) * camera.zoom;
@@ -1630,7 +1647,10 @@ function connectAndJoin(name, buyin, skinIndex){
         if(msg.cfg){
           CFG.WORLD_RADIUS = msg.cfg.WORLD_RADIUS;
           CFG.LEN_PER_DOLLAR = msg.cfg.LEN_PER_DOLLAR;
+          if(Number.isFinite(msg.cfg.CASHOUT_HOLD_SEC)) CASH_HOLD_MS = msg.cfg.CASHOUT_HOLD_SEC * 1000;
+          if(Number.isFinite(msg.cfg.MIN_PLAY_SEC)) MIN_PLAY_MS = msg.cfg.MIN_PLAY_SEC * 1000;
         }
+        spawnedAt = performance.now();
         resolve();
         return;
       }
@@ -1680,6 +1700,7 @@ function applySnapshot(msg){
     }
     rs.netX = s.x; rs.netY = s.y; rs.netAngle = s.angle;
     rs.length = s.length; rs.boosting = s.boosting; rs.name = s.name;
+    rs.prot = !!s.prot; // spawn protection: shown as a pulsing shield
   }
   for(const id of Array.from(netSnakes.keys())){
     if(!seen.has(id)) netSnakes.delete(id);
@@ -1999,14 +2020,24 @@ againBtn.addEventListener('click', ()=> goToMenu(deathScreen));
 /* Cashing out means holding the button (or the C key) for CASH_HOLD_MS while the snake stays on the map.
    The server does the real timing; this only sends the hold and draws the progress. The UI moves on in
    handleNetCashout() once the server confirms the amount. */
-const CASH_HOLD_MS = 5000;
+let CASH_HOLD_MS = 5000;   // these three are replaced by the server's values when a game starts
+let MIN_PLAY_MS = 10000;   // a snake must play this long before a cash-out can start
+let spawnedAt = 0;
 let cashHold = null; // { start, resend, frame } while held
+const cashLockedMs = ()=> Math.max(0, MIN_PLAY_MS - (performance.now() - spawnedAt));
+// While locked the button counts down; the server enforces the same minimum.
+setInterval(()=>{
+  if(!running || cashHold) return;
+  const left = cashLockedMs();
+  cashOutBtn.classList.toggle('locked', left > 0);
+  cashOutLabel.textContent = left > 0 ? 'Cash out in ' + Math.ceil(left / 1000) + 's' : 'Hold to Cash Out';
+}, 200);
 
 function sendCashMsg(t){
   if(ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ t }));
 }
 function beginCashHold(){
-  if(cashHold || !running || deathOutro.active) return;
+  if(cashHold || !running || deathOutro.active || cashLockedMs() > 0) return;
   cashHold = { start: performance.now(), resend: setInterval(()=> sendCashMsg('cashout'), 1000), frame: 0 };
   sendCashMsg('cashout');
   cashOutBtn.classList.add('armed');

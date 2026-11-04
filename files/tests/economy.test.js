@@ -34,12 +34,49 @@ for (const buyin of [CFG.MIN_BUYIN, 2.5, 5, 123.45]) {
   const paid = (w) => w.events.some((e) => e.type === 'cashout_result');
   const fresh = () => { const w = new GameWorld({ bots: 0 }); w.addPlayer({ id: 'p', name: 'p', buyin: 5, skinIndex: 0 }); return w; };
   const results = [];
+  const savedMinPlay = CFG.MIN_PLAY_SEC;
+  CFG.MIN_PLAY_SEC = 0; // the minimum play time has its own test below
 
   let w = fresh(); run(w, CFG.CASHOUT_HOLD_SEC - 0.5, refresh(w)); results.push(['not paid before the hold is over', !paid(w) && w.snakes.has('p')]);
   run(w, 1, refresh(w)); results.push(['paid once the hold is over, for the whole stake', paid(w) && Math.abs(w.events[0].data.amount - 5) < 1e-9]);
   w = fresh(); run(w, CFG.CASHOUT_HOLD_SEC - 1, refresh(w)); w.cancelCashout('p'); run(w, CFG.CASHOUT_HOLD_SEC, null); results.push(['letting go cancels it', !paid(w)]);
   w = fresh(); w.startCashout('p'); run(w, CFG.CASHOUT_HOLD_SEC + 2, null); results.push(['a hold nobody refreshes lapses', !paid(w)]);
   w = fresh(); run(w, 2, refresh(w)); w._kill(w.snakes.get('p'), 'x'); run(w, CFG.CASHOUT_HOLD_SEC, refresh(w)); results.push(['a snake killed mid-hold is not paid', !paid(w)]);
+  CFG.MIN_PLAY_SEC = savedMinPlay;
+
+  // minimum play time: a hold started too early is ignored; once the snake has played long enough it is accepted
+  w = fresh(); run(w, CFG.MIN_PLAY_SEC - 1, refresh(w)); results.push(['a cash-out hold before the minimum play time is ignored', w.snakes.get('p').cashoutHold == null && !paid(w)]);
+  run(w, 3, refresh(w)); results.push(['after the minimum play time a hold is accepted', w.snakes.get('p').cashoutHold != null]);
+  run(w, CFG.CASHOUT_HOLD_SEC + 1, refresh(w)); results.push(['and it pays out once held long enough', paid(w)]);
+
+  // spawn protection: a new snake can neither be killed nor kill, boosting gives it up, and it ends on time
+  const spot = (protectMe) => {
+    const g = new GameWorld({ bots: 0 });
+    const big = g.addPlayer({ id: 'big', name: 'big', buyin: 25, skinIndex: 0 });
+    big.protectedUntil = 0;
+    for (let i = 0; i < 40; i++) g.tick(1 / 30);                       // the big snake grows a body
+    const small = g.addPlayer({ id: 'small', name: 'small', buyin: 1, skinIndex: 0 });
+    if (!protectMe) small.protectedUntil = 0;
+    small.head.x = big.points[6].x; small.head.y = big.points[6].y;     // right on the big snake's body
+    small.points = [{ x: small.head.x, y: small.head.y }];
+    g.tick(1 / 30);
+    return g;
+  };
+  results.push(['a protected snake survives running into a body', spot(true).snakes.has('small')]);
+  results.push(['the same snake without protection dies', !spot(false).snakes.has('small')]);
+  const head = (protectMe) => {
+    const g = new GameWorld({ bots: 0 });
+    const big = g.addPlayer({ id: 'big', name: 'big', buyin: 25, skinIndex: 0 }); big.protectedUntil = 0;
+    const small = g.addPlayer({ id: 'small', name: 'small', buyin: 1, skinIndex: 0 }); if (!protectMe) small.protectedUntil = 0;
+    small.head.x = big.head.x; small.head.y = big.head.y;
+    g.tick(1 / 30);
+    return g;
+  };
+  results.push(['a protected snake survives a head-on meeting with a bigger one, and does not kill it', head(true).snakes.has('small') && head(true).snakes.has('big')]);
+  w = fresh(); w.setInput('p', 0, true); results.push(['boosting ends spawn protection', !w._isProtected(w.snakes.get('p'))]);
+  w = fresh(); run(w, CFG.SPAWN_PROTECT_SEC + 0.2, null); results.push(['protection ends after the set time', !w._isProtected(w.snakes.get('p'))]);
+  w = fresh(); results.push(['a fresh snake is protected', w._isProtected(w.snakes.get('p')) && w.snapshot().snakes[0].prot === 1]);
+
   let bad = 0;
   for (const [name, ok] of results) { if (!ok) bad++; console.log('hold-to-cash-out: ' + name + '  ' + (ok ? 'ok' : 'FAILED')); }
   if (bad) process.exitCode = 1;

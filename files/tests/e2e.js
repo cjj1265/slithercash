@@ -55,7 +55,7 @@ function startServer(gameKp, dataFile, extraEnv) {
     const env = Object.assign({}, process.env, {
       PORT: String(PORT), GAME_WALLET_SECRET: JSON.stringify(Array.from(gameKp.secretKey)),
       DEPOSIT_MASTER_SEED: MASTER, WALLET_DATA_FILE: dataFile, DEPOSIT_POLL_MS: '4000', WITHDRAW_RATE_MAX: '100',
-      ALERT_WEBHOOK_URL: 'http://localhost:' + HOOK_PORT + '/hook', CASHOUT_HOLD_SECONDS: '0.6',
+      ALERT_WEBHOOK_URL: 'http://localhost:' + HOOK_PORT + '/hook', CASHOUT_HOLD_SECONDS: '0.6', MIN_PLAY_SECONDS: '0', SPAWN_PROTECT_SECONDS: '0',
     }, extraEnv || {});
     child = spawn(process.execPath, ['-r', path.join(HERE, 'fake-preload.js'), 'index.js'], { cwd: FILES, env });
     let out = '';
@@ -420,6 +420,19 @@ const errOf = (state) => (state.msgs.find((m) => m.t === 'error') || {}).message
   const afterRestart = (await admin('GET', '/admin/api/status')).json;
   check('settings survive a restart', afterRestart.settings.maxBuyinCredits.value === 15 && afterRestart.settings.cashoutHoldSec.value === 0.5, afterRestart.settings);
   await admin('POST', '/admin/api/settings', { changes: { maxBuyinCredits: 20, cashoutHoldSec: 0.6 } });
+
+  // minimum play time, set from the admin page: an early cash-out is ignored, a later one pays
+  await admin('POST', '/admin/api/settings', { changes: { minPlaySec: 2 } });
+  const mp = await wsOpen(pidA, 5);
+  let mpPaid = false;
+  mp.ws.addEventListener('message', (ev) => { if (JSON.parse(ev.data).t === 'cashout_result') mpPaid = true; });
+  mp.ws.send(JSON.stringify({ t: 'cashout' })); // too early: ignored, and never repeated
+  await sleep(3200);
+  check('a cash-out started before the minimum play time is ignored', !mpPaid);
+  const mpLate = await wsCashout(mp);
+  check('after the minimum play time the cash-out pays the stake back', mpLate && near(mpLate.amount, 5, 1e-6), mpLate);
+  mp.ws.close();
+  await admin('POST', '/admin/api/settings', { changes: { minPlaySec: 0 } });
 
   const ast = (await admin('GET', '/admin/api/status')).json;
   const acts = (ast.audit || []).map((a) => a.action);
