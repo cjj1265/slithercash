@@ -267,8 +267,10 @@ function adminAuthorized(req) {
 
 // The cash-out hold is an admin setting (stored with the wallet data); the game reads it from CFG.
 function applyCashoutHold() {
-  const s = wallet.getSettings().cashoutHoldSec;
-  if (s && Number.isFinite(s.value)) CFG.CASHOUT_HOLD_SEC = s.value;
+  const st = wallet.getSettings();
+  if (st.cashoutHoldSec && Number.isFinite(st.cashoutHoldSec.value)) CFG.CASHOUT_HOLD_SEC = st.cashoutHoldSec.value;
+  if (st.minPlaySec && Number.isFinite(st.minPlaySec.value)) CFG.MIN_PLAY_SEC = st.minPlaySec.value;
+  if (st.spawnProtectSec && Number.isFinite(st.spawnProtectSec.value)) CFG.SPAWN_PROTECT_SEC = st.spawnProtectSec.value;
 }
 
 /** Everyone in a real-money game right now, for the admin page. Snake ids are already public (every snapshot carries them). */
@@ -575,7 +577,10 @@ function handleMessage(connId, msg) {
       session.conn.send({
         t: 'welcome',
         id: playerId,
-        cfg: { WORLD_RADIUS: CFG.WORLD_RADIUS, LEN_PER_DOLLAR: CFG.LEN_PER_DOLLAR, TICK_RATE: CFG.TICK_RATE },
+        cfg: {
+          WORLD_RADIUS: CFG.WORLD_RADIUS, LEN_PER_DOLLAR: CFG.LEN_PER_DOLLAR, TICK_RATE: CFG.TICK_RATE,
+          CASHOUT_HOLD_SEC: CFG.CASHOUT_HOLD_SEC, MIN_PLAY_SEC: CFG.MIN_PLAY_SEC, SPAWN_PROTECT_SEC: CFG.SPAWN_PROTECT_SEC,
+        },
       });
       break;
     }

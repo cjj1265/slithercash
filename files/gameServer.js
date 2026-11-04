@@ -41,6 +41,11 @@ const CFG = {
   // bail out the instant before dying. The server counts the time; the client only shows it.
   CASHOUT_HOLD_SEC: process.env.CASHOUT_HOLD_SECONDS !== undefined ? Number(process.env.CASHOUT_HOLD_SECONDS) : 5,
   CASHOUT_HOLD_LAPSE_SEC: 2, // the client re-sends the hold every second; silence this long cancels it
+  // A new snake cannot be killed (and cannot kill) for this long, so nobody is eaten the instant they spawn.
+  // Boosting ends it early. Both of these can be changed from the admin page.
+  SPAWN_PROTECT_SEC: process.env.SPAWN_PROTECT_SECONDS !== undefined ? Number(process.env.SPAWN_PROTECT_SECONDS) : 3,
+  // A snake must have been in the game this long before a cash-out hold is accepted.
+  MIN_PLAY_SEC: process.env.MIN_PLAY_SECONDS !== undefined ? Number(process.env.MIN_PLAY_SECONDS) : 10,
 };
 
 const SKIN_COUNT = 14; // must match client's SKINS.length
@@ -112,6 +117,7 @@ class GameWorld {
     const ang = rand(0, Math.PI * 2);
     return {
       id, name, isPlayer, alive: true, bornAt: this.elapsed,
+      protectedUntil: isPlayer ? this.elapsed + CFG.SPAWN_PROTECT_SEC : 0,
       skinIndex: skinIndex % SKIN_COUNT,
       colorSeed: rand(0, 999),
       head: { x: Math.cos(a) * r, y: Math.sin(a) * r },
@@ -151,12 +157,16 @@ class GameWorld {
     if (!s || !s.alive) return;
     if (typeof angle === 'number' && isFinite(angle)) s.targetAngle = angle;
     s.boosting = !!boosting;
+    if (s.boosting && this._isProtected(s)) s.protectedUntil = 0; // boosting gives up the protection
   }
+
+  _isProtected(s) { return s.protectedUntil > this.elapsed; }
 
   /** Starts (or refreshes) the hold-to-cash-out. The payout happens in tick() once the hold has lasted long enough. */
   startCashout(id) {
     const s = this.snakes.get(id);
     if (!s || !s.alive) return;
+    if (this.elapsed - s.bornAt < CFG.MIN_PLAY_SEC) return; // too soon: a snake has to play a while first
     if (s.cashoutHold === undefined || s.cashoutHold === null) s.cashoutHold = 0;
     s.cashoutHoldSeen = this.elapsed;
   }
@@ -254,7 +264,7 @@ class GameWorld {
   _buildGrid() {
     this.grid.clear();
     for (const s of this.snakes.values()) {
-      if (!s.alive) continue;
+      if (!s.alive || this._isProtected(s)) continue; // a protected snake's body cannot hurt anyone
       const r = radiusFor(s);
       for (let i = 0; i < s.points.length; i += 2) {
         const p = s.points[i];
@@ -301,6 +311,7 @@ class GameWorld {
     for (let i = 0; i < alive.length; i++) {
       for (let j = i + 1; j < alive.length; j++) {
         const a = alive[i], b = alive[j];
+        if (this._isProtected(a) || this._isProtected(b)) continue; // protected snakes pass through everyone
         if (doomed.has(a.id) && doomed.has(b.id)) continue;
         const ra = radiusFor(a), rb = radiusFor(b);
         const minDist = ra * 0.72 + rb * 0.72;
@@ -387,7 +398,7 @@ class GameWorld {
       this._checkOrbEating(s);
       const distFromCenter = Math.hypot(s.head.x, s.head.y);
       if (distFromCenter > CFG.WORLD_RADIUS) { this._kill(s, null); continue; }
-      const killerId = this._checkCollision(s);
+      const killerId = this._isProtected(s) ? null : this._checkCollision(s);
       if (killerId !== null) {
         const killer = this.snakes.get(killerId);
         this._kill(s, killer ? killer.name : null);
@@ -414,12 +425,14 @@ class GameWorld {
     const snakes = [];
     for (const s of this.snakes.values()) {
       if (!s.alive) continue;
-      snakes.push({
+      const entry = {
         id: s.id, name: s.name, x: round1(s.head.x), y: round1(s.head.y),
         angle: round3(s.angle), length: round1(s.length),
         boosting: s.boosting, skinIndex: s.skinIndex, colorSeed: round1(s.colorSeed),
         isPlayer: s.isPlayer,
-      });
+      };
+      if (this._isProtected(s)) entry.prot = 1; // only present while protected, to keep snapshots small
+      snakes.push(entry);
     }
     const orbs = this.orbs.map(o => ({ x: round1(o.x), y: round1(o.y), v: o.value }));
     return { snakes, orbs, elapsed: round3(this.elapsed) };

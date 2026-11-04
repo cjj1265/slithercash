@@ -81,7 +81,10 @@ const ALERT_URL = process.env.ALERT_WEBHOOK_URL || '';
 // at or below the buy-in costs nothing, and the stake itself is never touched. 0 turns it off.
 let RAKE_PERCENT = (() => { const n = Number(process.env.RAKE_PERCENT); return Number.isFinite(n) && n >= 0 && n <= 50 ? n : 5; })();
 // How long a cash-out must be held (seconds). index.js copies it onto the game; the admin page can change it.
-let cashoutHoldSec = process.env.CASHOUT_HOLD_SECONDS !== undefined && Number.isFinite(Number(process.env.CASHOUT_HOLD_SECONDS)) ? Number(process.env.CASHOUT_HOLD_SECONDS) : 5;
+const envSeconds = (name, fallback) => (process.env[name] !== undefined && Number.isFinite(Number(process.env[name])) ? Number(process.env[name]) : fallback);
+let cashoutHoldSec = envSeconds('CASHOUT_HOLD_SECONDS', 5);
+let minPlaySec = envSeconds('MIN_PLAY_SECONDS', 10);          // a snake must have played this long before it can start a cash-out
+let spawnProtectSec = envSeconds('SPAWN_PROTECT_SECONDS', 3); // a new snake cannot be killed (or kill) for this long
 
 // The only address house earnings can ever be sent to. It comes from the environment, never from a request,
 // so someone who got hold of the admin token still cannot redirect the money anywhere else.
@@ -220,6 +223,8 @@ const SETTING_DEFS = {
   lowWalletSol:      { label: 'Low-wallet alert at (SOL)',     min: 0.001, max: 100, get: () => lamportsToSol(LIMITS.lowWalletLamports),            set: (v) => { LIMITS.lowWalletLamports = solToLamports(v); } },
   rakePercent:       { label: 'House fee (% of profit)',       min: 0,     max: 20,  get: () => RAKE_PERCENT,                                       set: (v) => { RAKE_PERCENT = v; } },
   cashoutHoldSec:    { label: 'Cash-out hold (seconds)',       min: 0,     max: 30,  get: () => cashoutHoldSec,                                     set: (v) => { cashoutHoldSec = v; } },
+  minPlaySec:        { label: 'Play before cash-out (seconds)', min: 0,    max: 120, get: () => minPlaySec,                                         set: (v) => { minPlaySec = v; } },
+  spawnProtectSec:   { label: 'Spawn protection (seconds)',    min: 0,     max: 10,  get: () => spawnProtectSec,                                    set: (v) => { spawnProtectSec = v; } },
 };
 
 function currentSettings() {
