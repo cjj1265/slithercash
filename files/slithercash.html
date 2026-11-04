@@ -301,6 +301,10 @@
   /* ---------- Brand mark (menu only) ---------- */
   .brand-mark{ position:absolute; top:24px; left:28px; font-family:'Anton',sans-serif; font-size:14px; letter-spacing:2px; color:var(--gold-bright); text-transform:uppercase; opacity:0; }
   .brand-mark span{ color:var(--dim); }
+  .online-pill{ position:absolute; top:20px; left:50%; transform:translateX(-50%); display:flex; align-items:center; gap:8px; padding:7px 16px; border-radius:999px;
+    background:rgba(255,255,255,0.05); border:1px solid var(--hairline); font-family:'JetBrains Mono',monospace; font-size:12.5px; color:var(--white-muted); white-space:nowrap; }
+  .online-pill b{ color:var(--gold-bright); font-weight:800; }
+  .online-pill i{ width:8px; height:8px; border-radius:50%; background:#43d17a; box-shadow:0 0 8px rgba(67,209,122,0.8); }
 
   /* ---------- Menu entrance animation ---------- */
   @keyframes menuItemIn{ from{ opacity:0; transform:translateY(14px);} to{ opacity:1; transform:translateY(0);} }
@@ -453,6 +457,7 @@
 <!-- Start screen -->
 <div id="startScreen" class="overlay hidden">
   <div class="brand-mark">Snake<span>Pay</span></div>
+  <div class="online-pill" id="onlinePill" style="visibility:hidden"><i></i><span><b id="onlineCount">0</b> playing now</span></div>
   <div class="panel">
     <input id="nameInput" type="text" maxlength="16" placeholder="Enter your casher name">
 
@@ -2373,6 +2378,20 @@ wallet = loadWallet();
 history = loadHistory();
 renderWalletUI();
 solInit();
+
+/* "N playing now" on the main screen: refreshed every 10 seconds while the page is open and visible. */
+(function onlineCounter(){
+  const pill = document.getElementById('onlinePill'), num = document.getElementById('onlineCount');
+  const refresh = ()=>{
+    if(document.hidden) return;
+    fetch('/api/online').then(r => r.ok ? r.json() : null).then(d => {
+      if(d && Number.isFinite(d.online)){ num.textContent = d.online; pill.style.visibility = 'visible'; }
+    }).catch(()=>{});
+  };
+  refresh();
+  setInterval(refresh, 10000);
+  document.addEventListener('visibilitychange', refresh);
+})();
 runLoadingScreen();
 
 })();

@@ -172,12 +172,18 @@ async function handleApi(req, res) {
   try {
     const url = new URL(req.url, 'http://localhost');
     const route = req.method + ' ' + url.pathname;
-    const known = ['GET /api/config', 'GET /api/login-challenge', 'POST /api/login', 'GET /api/player-deposit-address', 'GET /api/player-balance', 'POST /api/check-deposit', 'POST /api/withdraw'];
+    const known = ['GET /api/config', 'GET /api/online', 'GET /api/login-challenge', 'POST /api/login', 'GET /api/player-deposit-address', 'GET /api/player-balance', 'POST /api/check-deposit', 'POST /api/withdraw'];
     if (!known.includes(route)) { sendJson(res, 404, { error: 'Not found.' }); return; }
 
     // Public and harmless: lets the page say "Devnet" or not before anyone connects a wallet.
     if (route === 'GET /api/config') {
       sendJson(res, 200, { enabled: wallet.isEnabled(), network: wallet.getNetwork(), creditsPerSol: wallet.CREDITS_PER_SOL, paused: wallet.isEnabled() ? wallet.isPaused() : false });
+      return;
+    }
+    // Public: the "playing now" counter on the main screen. Just a number, no names or balances.
+    if (route === 'GET /api/online') {
+      if (rateLimited('online', clientIp(req), 30, 60000)) throw new wallet.WalletError('rate_limited', 'Too many requests', 429);
+      sendJson(res, 200, { online: countPlayers() });
       return;
     }
     if (!wallet.isEnabled()) throw new wallet.WalletError('wallet_disabled', 'Solana wallet is not configured on this server', 503);
