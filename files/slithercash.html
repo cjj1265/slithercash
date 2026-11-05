@@ -464,6 +464,17 @@
   .buyin-label, .sol-key, #lbList li .rk{ font-weight:700; }
   .tagline, .hint, .sol-note, .wallet-sub{ font-weight:500; letter-spacing:0.3px; }
   #lbList .name{ font-weight:600; }
+  /* ---------- Sound on / off ---------- */
+  .sound-btn{ width:42px; height:42px; border-radius:50%; display:flex; align-items:center; justify-content:center; cursor:pointer; padding:0; color:var(--white-muted);
+    background:rgba(255,255,255,0.05); border:1px solid var(--hairline); transition:color .15s, border-color .15s, transform .15s; }
+  .sound-btn:hover{ color:var(--gold-bright); border-color:var(--gold-bright); transform:translateY(-2px); }
+  .sound-btn svg{ width:20px; height:20px; fill:currentColor; }
+  .sound-btn .cross{ display:none; }
+  .sound-btn.muted .waves{ display:none; }
+  .sound-btn.muted .cross{ display:block; }
+  .sound-btn.muted{ color:var(--dim); }
+  #cashOutWrap{ display:flex; align-items:center; gap:10px; }
+  .hud-sound{ background:rgba(10,14,12,0.55); backdrop-filter:blur(6px); }
 </style>
 </head>
 <body>
@@ -491,10 +502,11 @@
 </div>
 
 <div id="cashOutWrap" class="hud-hidden">
-  <button id="cashOutBtn">
+  <button id="cashOutBtn" data-nosound>
     <span class="co-icon">$</span>
     <span class="co-text"><span id="cashOutLabel">Hold to Cash Out</span> <span id="cashOutAmount">$0.00</span></span>
   </button>
+  <button type="button" class="sound-btn hud-sound" aria-label="Sound on" data-nosound><svg viewBox="0 0 24 24" aria-hidden="true"><path class="spk" d="M3 9v6h4l5 4V5L7 9H3z"/><path class="waves" d="M15.5 8.5a5 5 0 010 7M18 6a8.5 8.5 0 010 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path class="cross" d="M16 9l5 6M21 9l-5 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
 </div>
 
 <div id="boostBtn">
@@ -513,6 +525,7 @@
 <div id="startScreen" class="overlay hidden">
   <div class="brand-mark">snakepay<span>.lol</span></div>
   <div class="social-links">
+    <button type="button" class="sound-btn" aria-label="Sound on" data-nosound><svg viewBox="0 0 24 24" aria-hidden="true"><path class="spk" d="M3 9v6h4l5 4V5L7 9H3z"/><path class="waves" d="M15.5 8.5a5 5 0 010 7M18 6a8.5 8.5 0 010 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path class="cross" d="M16 9l5 6M21 9l-5 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
     <a href="https://www.tiktok.com/@snakepay.lol" target="_blank" rel="noopener noreferrer" aria-label="SnakePay on TikTok" title="TikTok">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z"/></svg>
     </a>
@@ -708,6 +721,154 @@ const SKINS = [
       return mixHex(base, '#fff7c9', qStep(shine, 5));
     } },
 ];
+/* ============================== SOUND ==============================
+   Every sound is made by code (Web Audio), so there are no files to load or license. Browsers only allow audio
+   after the player has clicked or pressed something, so the audio engine starts on the first one. Mute is
+   remembered between visits. */
+const sfx = (function(){
+  let ctx = null, master = null, noiseBuf = null;
+  const lastAt = {};
+  const state = { muted: false, vol: 0.7 };
+  try{ const s = JSON.parse(localStorage.getItem('sp_sound') || 'null'); if(s){ state.muted = !!s.muted; if(Number.isFinite(s.vol)) state.vol = clamp(s.vol, 0, 1); } }catch(e){}
+  const save = ()=>{ try{ localStorage.setItem('sp_sound', JSON.stringify(state)); }catch(e){} };
+
+  function ensure(){
+    if(!ctx){
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if(!AC) return false;
+      ctx = new AC();
+      master = ctx.createGain(); master.gain.value = state.muted ? 0 : state.vol; master.connect(ctx.destination);
+      const n = ctx.sampleRate, b = ctx.createBuffer(1, n, ctx.sampleRate), d = b.getChannelData(0); // one second of noise, reused
+      for(let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+      noiseBuf = b;
+    }
+    if(ctx.state === 'suspended') ctx.resume();
+    return true;
+  }
+
+  /** An oscillator with a quick attack and a decay; f1 glides the pitch. */
+  function tone(t, o){
+    const osc = ctx.createOscillator(), g = ctx.createGain();
+    osc.type = o.type || 'sine';
+    osc.frequency.setValueAtTime(o.f0, t);
+    if(o.f1) osc.frequency.exponentialRampToValueAtTime(o.f1, t + o.dur);
+    const peak = o.gain === undefined ? 0.3 : o.gain, atk = o.attack === undefined ? 0.004 : o.attack;
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(peak, t + atk); g.gain.exponentialRampToValueAtTime(0.0001, t + o.dur);
+    osc.connect(g); g.connect(master); osc.start(t); osc.stop(t + o.dur + 0.02);
+  }
+  /** Filtered noise: a burst, a whoosh or a click. */
+  function noise(t, o){
+    const src = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = ctx.createGain();
+    src.buffer = noiseBuf; f.type = o.filter || 'bandpass'; f.Q.value = o.q || 1;
+    f.frequency.setValueAtTime(o.f0, t);
+    if(o.f1) f.frequency.exponentialRampToValueAtTime(o.f1, t + o.dur);
+    const peak = o.gain === undefined ? 0.3 : o.gain, atk = o.attack === undefined ? 0.004 : o.attack;
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(peak, t + atk); g.gain.exponentialRampToValueAtTime(0.0001, t + o.dur);
+    src.connect(f); f.connect(g); g.connect(master); src.start(t, Math.random() * 0.4); src.stop(t + o.dur + 0.02);
+  }
+  /** A bell-like ping: a few harmonics that die away together. */
+  function bell(t, f, gain, dur){
+    [[1, 1], [2.01, 0.45], [3.02, 0.22], [4.2, 0.1]].forEach(([m, a]) => tone(t, { f0: f * m, dur: dur * (m > 2 ? 0.6 : 1), gain: gain * a, attack: 0.002 }));
+  }
+
+  const R = {
+    orbPop(t){ tone(t, { f0: 680, f1: 1500, dur: 0.07, gain: 0.35 }); },
+    orbTick(t){ tone(t, { type: 'triangle', f0: 1900, dur: 0.035, gain: 0.3 }); noise(t, { dur: 0.012, filter: 'highpass', f0: 4000, gain: 0.12 }); },
+    orbBig(t){ bell(t, 988, 0.3, 0.32); bell(t + 0.075, 1319, 0.3, 0.42); },
+    killSmack(t){
+      noise(t, { dur: 0.09, filter: 'lowpass', f0: 1200, f1: 300, gain: 0.5 });
+      tone(t, { f0: 170, f1: 48, dur: 0.18, gain: 0.55 });
+      [1318, 1568, 1976, 2349, 1760].forEach((f, i) => tone(t + 0.1 + i * 0.045, { f0: f, dur: 0.16, gain: 0.16 }));
+    },
+    killCrunch(t){
+      tone(t, { type: 'square', f0: 240, f1: 60, dur: 0.16, gain: 0.22 });
+      noise(t, { dur: 0.12, filter: 'highpass', f0: 1500, gain: 0.35 });
+      bell(t + 0.14, 1568, 0.26, 0.4); bell(t + 0.24, 2093, 0.26, 0.45);
+    },
+    protectEnd(t){ bell(t, 784, 0.22, 0.25); bell(t + 0.11, 1047, 0.22, 0.3); },
+    deny(t){ tone(t, { type: 'square', f0: 190, dur: 0.07, gain: 0.16 }); tone(t + 0.1, { type: 'square', f0: 170, dur: 0.09, gain: 0.16 }); },
+    holdTick(t){ tone(t, { f0: 1100, dur: 0.04, gain: 0.25 }); },
+    cashChing(t){
+      noise(t, { dur: 0.05, filter: 'highpass', f0: 3500, gain: 0.3 });
+      bell(t + 0.06, 2093, 0.3, 0.9); bell(t + 0.06, 3136, 0.16, 0.7);
+      [2637, 3136, 2349, 3520, 2794, 3951].forEach((f, i) => tone(t + 0.3 + i * 0.07, { f0: f, dur: 0.18, gain: 0.1 }));
+    },
+    cashJackpot(t){
+      [523, 659, 784, 1047, 1319].forEach((f, i) => tone(t + i * 0.07, { type: 'triangle', f0: f, dur: 0.14, gain: 0.26 }));
+      [1047, 1319, 1568, 2093].forEach(f => bell(t + 0.4, f, 0.14, 0.9));
+    },
+    death(t){
+      tone(t, { f0: 190, f1: 38, dur: 0.35, gain: 0.6 });
+      noise(t, { dur: 0.1, filter: 'lowpass', f0: 900, gain: 0.4 });
+      const osc = ctx.createOscillator(), lp = ctx.createBiquadFilter(), g = ctx.createGain();
+      osc.type = 'sawtooth'; osc.frequency.setValueAtTime(330, t + 0.12); osc.frequency.exponentialRampToValueAtTime(70, t + 0.85);
+      lp.type = 'lowpass'; lp.frequency.value = 900;
+      g.gain.setValueAtTime(0.0001, t + 0.12); g.gain.exponentialRampToValueAtTime(0.16, t + 0.2); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.9);
+      osc.connect(lp); lp.connect(g); g.connect(master); osc.start(t + 0.12); osc.stop(t + 0.95);
+    },
+    click(t){ tone(t, { f0: 1250, dur: 0.025, gain: 0.25 }); },
+    skinBuy(t){
+      [659, 784, 988, 1319, 1568, 1976].forEach((f, i) => bell(t + i * 0.07, f, 0.14, 0.45));
+      noise(t, { dur: 0.6, filter: 'highpass', f0: 5000, gain: 0.07, attack: 0.3 });
+    },
+    discordPost(t){
+      noise(t, { dur: 0.2, filter: 'bandpass', f0: 300, f1: 2600, q: 2, gain: 0.9, attack: 0.1 });
+      tone(t + 0.2, { f0: 700, f1: 1100, dur: 0.1, gain: 0.3 });
+    },
+  };
+  // sounds that come in two versions play one of them at random, so they do not get repetitive
+  const VARIANTS = { orb: ['orbPop', 'orbTick'], kill: ['killSmack', 'killCrunch'], cash: ['cashChing', 'cashJackpot'] };
+  const MIN_GAP = { orbPop: 0.05, orbTick: 0.05, orbBig: 0.08, click: 0.03, holdTick: 0.2 };   // seconds between plays
+
+  function play(name){
+    if(state.muted || !ensure()) return;
+    const v = VARIANTS[name], key = v ? v[(Math.random() * v.length) | 0] : name;
+    if(!R[key]) return;
+    const now = ctx.currentTime;
+    if(MIN_GAP[key] && now - (lastAt[key] || -1) < MIN_GAP[key]) return;
+    lastAt[key] = now;
+    R[key](now + 0.01);
+  }
+
+  /** The tone that climbs while Cash Out is held. It lasts `secs`; stopHold() fades it out at once. */
+  let hold = null;
+  function startHold(secs){
+    stopHold();
+    if(state.muted || !ensure()) return;
+    const t = ctx.currentTime + 0.01, osc = ctx.createOscillator(), lp = ctx.createBiquadFilter(), g = ctx.createGain(), lfo = ctx.createOscillator(), lg = ctx.createGain();
+    osc.type = 'sawtooth'; osc.frequency.setValueAtTime(150, t); osc.frequency.exponentialRampToValueAtTime(640, t + secs);
+    lp.type = 'lowpass'; lp.frequency.setValueAtTime(500, t); lp.frequency.exponentialRampToValueAtTime(3500, t + secs);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.14, t + 0.4);
+    lfo.frequency.setValueAtTime(3, t); lfo.frequency.linearRampToValueAtTime(14, t + secs); lg.gain.value = 0.05;
+    lfo.connect(lg); lg.connect(g.gain); osc.connect(lp); lp.connect(g); g.connect(master);
+    osc.start(t); lfo.start(t); osc.stop(t + secs + 0.2); lfo.stop(t + secs + 0.2);
+    hold = { g, osc, lfo };
+  }
+  function stopHold(){
+    if(!hold || !ctx) return;
+    const t = ctx.currentTime;
+    try{ hold.g.gain.cancelScheduledValues(t); hold.g.gain.setValueAtTime(Math.max(0.0001, hold.g.gain.value), t); hold.g.gain.exponentialRampToValueAtTime(0.0001, t + 0.08); hold.osc.stop(t + 0.1); hold.lfo.stop(t + 0.1); }catch(e){}
+    hold = null;
+  }
+
+  function setMuted(m){
+    state.muted = !!m; save();
+    if(master) master.gain.value = state.muted ? 0 : state.vol;
+    if(state.muted) stopHold();
+    document.querySelectorAll('.sound-btn').forEach(b => { b.classList.toggle('muted', state.muted); b.setAttribute('aria-label', state.muted ? 'Sound off' : 'Sound on'); });
+  }
+  // the first click or key press wakes the audio up (browsers insist on this)
+  ['pointerdown', 'keydown'].forEach(ev => window.addEventListener(ev, ()=>{ if(!state.muted) ensure(); }, { once: true, capture: true }));
+  return { play, startHold, stopHold, setMuted, isMuted: ()=> state.muted };
+})();
+// every button clicks, except the ones that have a sound of their own
+document.addEventListener('click', (e)=>{
+  const b = e.target.closest && e.target.closest('button');
+  if(b && !b.hasAttribute('data-nosound')) sfx.play('click');
+}, true);
+document.querySelectorAll('.sound-btn').forEach(b => b.addEventListener('click', ()=> sfx.setMuted(!sfx.isMuted())));
+sfx.setMuted(sfx.isMuted()); // show the saved state on the buttons
+
 const BOT_NAME_PARTS1 = ["Big","Lucky","Silk","Cold","High","Fast","Slick","Diamond","Royal","Iron","Neon","Velvet","Turbo","Ghost","Prime"];
 const BOT_NAME_PARTS2 = ["Roller","Stacker","Hustler","Baron","Whale","Grinder","Shark","Bandit","Ace","Fox","Viper","Comet","Dealer","Chip","Runner"];
 function randName(){
@@ -1724,6 +1885,7 @@ skinActionBtn.addEventListener('click', async ()=>{
     solApplyBalance(r);
     equipSkin(i);
     skinMsg.textContent = 'Unlocked. It is now your snake.';
+    sfx.play('skinBuy');
   }catch(e){
     if(e.status === 401) solReset('Session expired — reconnect your wallet.');
     skinMsg.textContent = e.message;
@@ -1769,6 +1931,7 @@ let netOrbsRaw = [];
 let playerBestRank = 999;
 let pendingDeath = null;
 let lastInputSent = 0;
+const mySfx = { len: null, prot: false }; // what the sounds compare each snapshot against
 
 function wsUrl(){
   if(location.protocol === 'file:') return 'ws://localhost:8787'; // opened the HTML directly, not served by the server
@@ -1808,6 +1971,7 @@ function connectAndJoin(name, buyin, skinIndex){
           if(Number.isFinite(msg.cfg.MIN_PLAY_SEC)) MIN_PLAY_MS = msg.cfg.MIN_PLAY_SEC * 1000;
         }
         spawnedAt = performance.now();
+        mySfx.len = null; mySfx.prot = false;
         resolve();
         return;
       }
@@ -1833,6 +1997,7 @@ function handleNetMessage(msg){
   if(msg.t === 'snapshot') applySnapshot(msg);
   else if(msg.t === 'death') handleNetDeath(msg);
   else if(msg.t === 'cashout_result') handleNetCashout(msg);
+  else if(msg.t === 'kill') sfx.play('kill');
 }
 
 function applySnapshot(msg){
@@ -1858,6 +2023,12 @@ function applySnapshot(msg){
     rs.netX = s.x; rs.netY = s.y; rs.netAngle = s.angle;
     rs.length = s.length; rs.boosting = s.boosting; rs.name = s.name;
     rs.prot = !!s.prot; // spawn protection: shown as a pulsing shield
+    if(s.id === netYouId){
+      // your own sounds: eating (your length went up), and spawn protection running out
+      if(mySfx.len !== null){ const gain = s.length - mySfx.len; if(gain > 7) sfx.play('orbBig'); else if(gain > 0.6) sfx.play('orb'); }
+      if(mySfx.prot && !s.prot) sfx.play('protectEnd');
+      mySfx.len = s.length; mySfx.prot = !!s.prot;
+    }
   }
   for(const id of Array.from(netSnakes.keys())){
     if(!seen.has(id)) netSnakes.delete(id);
@@ -2007,6 +2178,7 @@ function netFrame(t){
 }
 
 function handleNetDeath(msg){
+  sfx.play('death');
   document.getElementById('killLine').textContent = msg.killerName ? ('Cut off by ' + msg.killerName) : 'Ran into the wall';
   pendingDeath = msg;
   deathOutro.active = true;
@@ -2253,6 +2425,7 @@ postWinBtn.addEventListener('click', async ()=>{
     await solApi('/api/post-win', { method: 'POST', body: JSON.stringify({ winId: currentWinId }) });
     currentWinId = null;
     postWinLabel.textContent = 'Posted to #wins ✓';
+    sfx.play('discordPost');
   }catch(e){
     postWinLabel.textContent = e.message;
     const retry = !e.status || e.status >= 500;     // a busy Discord can be tried again; the other answers are final
@@ -2273,6 +2446,7 @@ function handleNetCashout(msg){
     invested: msg.buyin, position: received, sub: lastPlayerName ? '@' + lastPlayerName : '',
   });
   setupPostWin(msg.winId);
+  sfx.play(profit >= 0 ? 'cash' : 'protectEnd'); // a cash-out below the buy-in gets a plain chime instead of the cheer
 
   hud.classList.add('hud-hidden');
   leaderboardEl.classList.add('hud-hidden');
@@ -2420,9 +2594,11 @@ function sendCashMsg(t){
   if(ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ t }));
 }
 function beginCashHold(){
-  if(cashHold || !running || deathOutro.active || cashLockedMs() > 0) return;
-  cashHold = { start: performance.now(), resend: setInterval(()=> sendCashMsg('cashout'), 1000), frame: 0 };
+  if(cashHold || !running || deathOutro.active) return;
+  if(cashLockedMs() > 0){ sfx.play('deny'); return; }
+  cashHold = { start: performance.now(), resend: setInterval(()=>{ sendCashMsg('cashout'); sfx.play('holdTick'); }, 1000), frame: 0 };
   sendCashMsg('cashout');
+  sfx.startHold(CASH_HOLD_MS / 1000);
   cashOutBtn.classList.add('armed');
   const step = ()=>{
     if(!cashHold) return;
@@ -2436,6 +2612,7 @@ function beginCashHold(){
 }
 function endCashHold(){
   if(!cashHold) return;
+  sfx.stopHold();
   clearInterval(cashHold.resend);
   cancelAnimationFrame(cashHold.frame);
   cashHold = null;
