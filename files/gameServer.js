@@ -141,12 +141,18 @@ class GameWorld {
   }
 
   _makeSnake({ id, name, isPlayer, skinIndex, startLen }) {
-    const a = rand(0, Math.PI * 2);
-    const r = Math.sqrt(Math.random()) * (this.radius * (isPlayer ? 0.5 : 0.75));
+    // A spot clear of every other snake's body (so you never spawn inside someone), from a few tries at random places.
+    let a = 0, r = 0;
+    for (let tries = 0; tries < 40; tries++) {
+      a = rand(0, Math.PI * 2);
+      r = Math.sqrt(Math.random()) * (this.radius * (isPlayer ? 0.5 : 0.75));
+      if (this._hitAt({ id: null }, Math.cos(a) * r, Math.sin(a) * r, 24) === null) break;
+    }
     const ang = rand(0, Math.PI * 2);
     return {
       id, name, isPlayer, alive: true, bornAt: this.elapsed,
       protectedUntil: isPlayer ? this.elapsed + CFG.SPAWN_PROTECT_SEC : 0,
+      spawnGrace: isPlayer, // protection is kept up after it runs out for as long as the snake is still inside another's body
       skinIndex: skinIndex % SKIN_COUNT,
       colorSeed: rand(0, 999),
       head: { x: Math.cos(a) * r, y: Math.sin(a) * r },
@@ -225,6 +231,7 @@ class GameWorld {
     const speed = CFG.NORMAL_SPEED * (wantsBoost ? CFG.BOOST_MULT : 1);
 
     const px = snake.head.x, py = snake.head.y;
+    snake.prevX = px; snake.prevY = py; // where the head was before this move (a hit is placed exactly on the edge, see _backUpToContact)
     snake.head.x += Math.cos(snake.angle) * speed * dt;
     snake.head.y += Math.sin(snake.angle) * speed * dt;
 
@@ -318,26 +325,57 @@ class GameWorld {
 
   /** Body collision only — head-region points are ignored here (see _checkHeadOn). */
   _checkCollision(snake) {
-    const r = radiusFor(snake);
-    const cx = Math.floor(snake.head.x / CFG.GRID_CELL);
-    const cy = Math.floor(snake.head.y / CFG.GRID_CELL);
+    return this._hitAt(snake, snake.head.x, snake.head.y, radiusFor(snake));
+  }
+
+  /** The id of the snake whose body a head of radius `r` at (x, y) would be touching, or null. */
+  _hitAt(snake, x, y, r) {
+    const cx = Math.floor(x / CFG.GRID_CELL), cy = Math.floor(y / CFG.GRID_CELL);
     for (let gx = cx - 1; gx <= cx + 1; gx++) {
       for (let gy = cy - 1; gy <= cy + 1; gy++) {
         const arr = this.grid.get(gx + ',' + gy);
         if (!arr) continue;
         for (const entry of arr) {
           if (entry.ownerId === snake.id) continue;
-          if (entry.isHead) continue; // handled by _checkHeadOn
+          if (entry.isHead) continue; // handled by _resolveHeadOnCollisions
           // The grid was built at the start of the tick: a snake that has died since (killed head-on, say) is gone, and
           // running into where it was must not kill you, or blame the wall.
           const owner = this.snakes.get(entry.ownerId);
           if (!owner || !owner.alive) continue;
           const minDist = (r + entry.r) * CFG.HIT_SCALE;
-          if (dist2(snake.head.x, snake.head.y, entry.x, entry.y) < minDist * minDist) return entry.ownerId;
+          if (dist2(x, y, entry.x, entry.y) < minDist * minDist) return entry.ownerId;
         }
       }
     }
     return null;
+  }
+  /**
+   * A snake moves a few units each tick, so the tick it hits something it has usually gone a little way INTO it. The
+   * head is put back on the exact spot where its edge first touched (found by halving the step), so it stops on the edge
+   * like in slither.io, and that spot is what the player's screen freezes on.
+   */
+  _backUpToContact(snake, touching) {
+    const ax = snake.prevX, ay = snake.prevY, bx = snake.head.x, by = snake.head.y;
+    if (ax === undefined || touching(ax, ay)) return; // already touching before this move (just spawned)
+    let lo = 0, hi = 1;
+    for (let i = 0; i < 14; i++) {
+      const mid = (lo + hi) / 2;
+      if (touching(ax + (bx - ax) * mid, ay + (by - ay) * mid)) hi = mid; else lo = mid;
+    }
+    snake.head.x = ax + (bx - ax) * hi; snake.head.y = ay + (by - ay) * hi; // hi: just inside, so the hit still counts as a touch
+  }
+
+  /** A snake's body points (head end first) as one flat list of numbers, sent once to each player who has not seen the snake yet. */
+  bodyOf(id) {
+    const s = this.snakes.get(id), out = [];
+    if (s) {
+      // every second point (8 units apart), whole numbers: the page joins them with straight lines and re-spaces them, which is
+      // indistinguishable on screen and a third of the size (a very long snake is thousands of points)
+      for (let i = 0; i < s.points.length; i += 2) out.push(Math.round(s.points[i].x), Math.round(s.points[i].y));
+      const last = s.points[s.points.length - 1];
+      if (s.points.length % 2 === 0 && last) out.push(Math.round(last.x), Math.round(last.y));
+    }
+    return out;
   }
 
   /**
@@ -437,7 +475,7 @@ class GameWorld {
       this.events.push({
         type: 'death',
         targetId: snake.id,
-        data: { killerName: killerName || null, buyin: snake.buyin, bestRank: snake.bestRank, coinsEaten: snake.coinsEaten },
+        data: { killerName: killerName || null, buyin: snake.buyin, bestRank: snake.bestRank, coinsEaten: snake.coinsEaten, x: round1(snake.head.x), y: round1(snake.head.y), angle: round3(snake.angle) },
       });
       this.snakes.delete(snake.id);
     } else {
@@ -465,7 +503,11 @@ class GameWorld {
     // than both snakes registering a "body hit" on each other and both dying.
     for (const [victim, killerName, killerId] of this._resolveHeadOnCollisions()) {
       // In a three-way meeting the winner of one head-on can itself lose another; the victim still gets the winner's name, but a snake that is gone cannot be credited with a kill.
-      if (victim.alive) { const k = this.snakes.get(killerId); this._kill(victim, killerName, k && k.alive ? killerId : undefined); }
+      if (victim.alive) {
+        const k = this.snakes.get(killerId);
+        if (k) { const md = (radiusFor(victim) + radiusFor(k)) * CFG.HIT_SCALE; this._backUpToContact(victim, (x, y) => dist2(x, y, k.head.x, k.head.y) < md * md); }
+        this._kill(victim, killerName, k && k.alive ? killerId : undefined);
+      }
     }
 
     // Ranks by length, worked out once per tick (not once per snake).
@@ -476,8 +518,16 @@ class GameWorld {
       this._checkOrbEating(s);
       const distFromCenter = Math.hypot(s.head.x, s.head.y);
       if (distFromCenter > this.radius) { this._kill(s, null); continue; }
-      const killerId = this._isProtected(s) ? null : this._checkCollision(s);
+      let killerId = this._isProtected(s) ? null : this._checkCollision(s);
+      if (s.spawnGrace && !this._isProtected(s)) {
+        if (killerId !== null) { s.protectedUntil = this.elapsed + 0.3; killerId = null; } // still inside someone: not yet
+        else s.spawnGrace = false;
+      }
       if (killerId !== null) {
+        const rs = radiusFor(s);
+        this._backUpToContact(s, (x, y) => this._hitAt(s, x, y, rs) !== null);
+        const touched = this._hitAt(s, s.head.x, s.head.y, rs); // the snake whose edge it actually stopped on (the first one it reached)
+        if (touched !== null) killerId = touched;
         const killer = this.snakes.get(killerId);
         this._kill(s, killer ? killer.name : null, killer ? killer.id : undefined);
       } else {

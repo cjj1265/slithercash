@@ -144,7 +144,7 @@ const pct = (p) => tickMs[Math.min(tickMs.length - 1, Math.floor(tickMs.length *
 console.log('soak: ' + MINUTES + ' game-minutes, ' + PLAYERS + ' players, seed ' + START_SEED + ', ' + ((Date.now() - started) / 1000).toFixed(1) + ' s of real time');
 console.log('  joins ' + stats.joins + ', cash-outs ' + stats.cashouts + ', deaths ' + stats.deaths + ' (wall ' + stats.wallDeaths + '), kills ' + stats.kills + ', most orbs at once ' + stats.maxOrbs);
 console.log('  tick time ms: p50 ' + pct(0.5).toFixed(2) + ', p95 ' + pct(0.95).toFixed(2) + ', p99 ' + pct(0.99).toFixed(2) + ', max ' + tickMs[tickMs.length - 1].toFixed(2) + ' (budget ' + (DT * 1000).toFixed(1) + ')');
-if (pct(0.99) > 20) fail('the server is too slow at the 99th percentile', pct(0.99));
+if (pct(0.99) > DT * 1000) fail('the server is too slow at the 99th percentile', pct(0.99));
 if (stats.kills === 0 || stats.cashouts === 0) fail('the test did not exercise kills and cash-outs', stats);
 if (failures) { console.log('\n' + failures + ' problem' + (failures === 1 ? '' : 's') + ':'); problems.forEach((p) => console.log('  FAIL  ' + p)); console.log('\nrepeat with:  SEED=' + START_SEED + ' npm run test:soak'); process.exit(1); }
 console.log('\nno problems found');

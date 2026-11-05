@@ -56,6 +56,27 @@ console.log('\n== no invisible tail: you only die where the body really is ==');
   check('a snake crossing 60 units behind the tail tip survives (it used to die on the invisible part)', trial(false) === false);
   check('a snake crossing through the real body still dies', trial(true) === true);
 }
+console.log('\n== the head stops on the edge it hits ==');
+{
+  let worst = 0, n = 0, deepest = 0;
+  for (let k = 0; k < 40; k++) {
+    const w = newWorld();
+    const a = spawn(w, 'a', 50, 0, 0, 0);
+    for (let i = 0; i < 160; i++) w.tick(DT);
+    const mid = a.points[Math.floor(a.points.length / 2)];
+    const b = spawn(w, 'b', 20, mid.x + (k % 5) * 3, mid.y - 140, Math.PI / 2);
+    b.targetAngle = Math.PI / 2; b.boosting = k % 2 === 0;
+    let hit = null; const ok = w._kill.bind(w);
+    w._kill = (sn, kn, kid) => { if (sn.id === 'b') hit = { x: sn.head.x, y: sn.head.y, rb: Math.min(34, CFG.BASE_RADIUS + Math.sqrt(sn.length) * 0.62) }; return ok(sn, kn, kid); };
+    for (let i = 0; i < 90 && !hit; i++) w.tick(DT);
+    if (!hit) continue;
+    const ra = Math.min(34, CFG.BASE_RADIUS + Math.sqrt(a.length) * 0.62);
+    let best = 1e9; for (let i = 2; i < a.points.length; i++) best = Math.min(best, dist(hit, a.points[i]));
+    n++; worst = Math.max(worst, Math.abs(best - (ra + hit.rb) * CFG.HIT_SCALE)); deepest = Math.max(deepest, (ra + hit.rb) - best);
+  }
+  check('the snake that hit is stopped exactly on the other snake\'s edge (within 0.5 unit)', n >= 30 && worst < 0.5, { n, worst: +worst.toFixed(3) });
+}
+
 console.log('\n== a head-on kills exactly one snake ==');
 {
   let both = 0, none = 0, oneA = 0, oneB = 0;

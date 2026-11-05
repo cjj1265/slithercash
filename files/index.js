@@ -757,13 +757,23 @@ function findSessionByPlayerId(playerId) {
 const VIEW_RADIUS = 2700;
 
 function broadcastSnapshot(world) {
-  const snakesJson = JSON.stringify(world.snapshotSnakes()); // once for everyone
+  const snakesList = world.snapshotSnakes();
+  const snakesJson = JSON.stringify(snakesList); // once for everyone
   const elapsed = Math.round(world.elapsed * 1000) / 1000;
   for (const session of sessions.values()) {
     if (!session.playerId || session.world !== world) continue; // un-joined sockets, and the other world's players, get nothing
     const me = world.snakes.get(session.playerId);
     if (me) session.view = { x: me.head.x, y: me.head.y }; // after a death the last view is kept
     const v = session.view || { x: 0, y: 0 };
+    // The page builds each body from the path its head takes, so a snake it has not watched yet would show only a stub
+    // (the rest invisible, yet deadly). Each snake's real body is sent once, the first time this player is sent that snake.
+    if (!session.knownSnakes) session.knownSnakes = new Set();
+    for (const sn of snakesList) {
+      if (session.knownSnakes.has(sn.id)) continue;
+      session.knownSnakes.add(sn.id);
+      session.conn.send({ t: 'body', id: sn.id, pts: world.bodyOf(sn.id) });
+    }
+    if (session.knownSnakes.size > snakesList.length) { const live = new Set(snakesList.map((x) => x.id)); for (const id of session.knownSnakes) if (!live.has(id)) session.knownSnakes.delete(id); }
     // youId and the nearby orbs differ per client, so each client gets its own string around the shared snakes.
     session.conn.send('{"t":"snapshot","youId":' + JSON.stringify(session.playerId) + ',"snakes":' + snakesJson +
       ',"orbs":' + JSON.stringify(world.orbsNear(v.x, v.y, VIEW_RADIUS)) + ',"elapsed":' + elapsed + '}');

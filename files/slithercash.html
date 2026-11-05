@@ -2016,6 +2016,7 @@ function connectAndJoin(name, buyin, skinIndex){
           if(Number.isFinite(msg.cfg.CASHOUT_HOLD_SEC)) CASH_HOLD_MS = msg.cfg.CASHOUT_HOLD_SEC * 1000;
           if(Number.isFinite(msg.cfg.MIN_PLAY_SEC)) MIN_PLAY_MS = msg.cfg.MIN_PLAY_SEC * 1000;
         }
+        worldFrozen = false;
         spawnedAt = performance.now();
         mySfx.len = null; mySfx.prot = false;
         netRttMs = 0; clearInterval(netPingTimer);
@@ -2045,6 +2046,7 @@ function netDisconnect(){
 
 function handleNetMessage(msg){
   if(msg.t === 'snapshot') applySnapshot(msg);
+  else if(msg.t === 'body') applyBody(msg);
   else if(msg.t === 'death') handleNetDeath(msg);
   else if(msg.t === 'cashout_result') handleNetCashout(msg);
   else if(msg.t === 'kill') sfx.play('kill');
@@ -2052,6 +2054,20 @@ function handleNetMessage(msg){
     const rtt = performance.now() - msg.ts;
     if(rtt >= 0 && rtt < 3000) netRttMs = netRttMs ? netRttMs * 0.7 + rtt * 0.3 : rtt;
   }
+}
+
+/* The server sends each snake's real body once, the first time this page hears of that snake. Without it a snake already on
+   the map shows only the stub it has crawled since you joined: the rest of its body is invisible, but still deadly. */
+const pendingBodies = new Map();
+function bodyToRaw(head, pts){
+  const raw = [{ x: head.x, y: head.y }];
+  for(let i = 0; i + 1 < pts.length; i += 2) raw.push({ x: pts[i], y: pts[i + 1] });
+  return raw;
+}
+function applyBody(msg){
+  if(!msg || typeof msg.id !== 'string' || !Array.isArray(msg.pts)) return;
+  const rs = netSnakes.get(msg.id);
+  if(rs) rs.raw = bodyToRaw(rs.head, msg.pts); else pendingBodies.set(msg.id, msg.pts);
 }
 
 function applySnapshot(msg){
@@ -2068,12 +2084,13 @@ function applySnapshot(msg){
         skinIndex: s.skinIndex, colors: skin.colors, glow: skin.glow,
         head: { x: s.x, y: s.y }, angle: s.angle, targetAngle: s.angle,
         points: [{ x: s.x, y: s.y }], distSincePoint: 0,
-        raw: [{ x: s.x, y: s.y }],
+        raw: pendingBodies.has(s.id) ? bodyToRaw({ x: s.x, y: s.y }, pendingBodies.get(s.id)) : [{ x: s.x, y: s.y }],
         length: s.length, buyin: s.length / CFG.LEN_PER_DOLLAR, coinsEaten: 0,
         boosting: s.boosting, bestRank: 999, colorSeed: s.colorSeed,
         netX: s.x, netY: s.y, netAngle: s.angle, snapAt, speed: CFG.NORMAL_SPEED,
       };
       netSnakes.set(s.id, rs);
+      pendingBodies.delete(s.id);
     }
     rs.netX = s.x; rs.netY = s.y; rs.netAngle = s.angle;
     rs.snapAt = snapAt; rs.speed = CFG.NORMAL_SPEED * (s.boosting ? CFG.BOOST_MULT : 1);
@@ -2128,16 +2145,19 @@ function resamplePath(raw, spacing, count){
   return out;
 }
 
-function netInterpolate(dt){
-  const posT = 1 - Math.exp(-22 * dt);  // frame-rate independent easing
-  const angT = 1 - Math.exp(-14 * dt);
+let worldFrozen = false; // after you die everything stays exactly as it was at the moment of the hit, while the screen fades
+function netInterpolate(dt, snapAhead){
+  if(worldFrozen) return;
+  const posT = snapAhead !== undefined ? 1 : 1 - Math.exp(-22 * dt);  // frame-rate independent easing
+  const angT = snapAhead !== undefined ? 1 : 1 - Math.exp(-14 * dt);
   // The server has moved on since each snapshot was made: by the time since it arrived, plus half the round trip (the
   // time it took to get here). Each snake is drawn where the server has it NOW, so what you see touching is what the
   // server sees touching. (Before, everything was drawn a little behind, so you could die before reaching something.)
   const now = performance.now(), oneWay = clamp(netRttMs / 2000, 0, 0.2);
 
   for(const rs of netSnakes.values()){
-    const ahead = Math.min(0.35, (now - rs.snapAt) / 1000 + oneWay);
+    if(rs.frozen) continue; // dead: stays exactly where it hit
+    const ahead = snapAhead !== undefined ? snapAhead : Math.min(0.35, (now - rs.snapAt) / 1000 + oneWay);
     const tx = rs.netX + Math.cos(rs.netAngle) * rs.speed * ahead, ty = rs.netY + Math.sin(rs.netAngle) * rs.speed * ahead;
     const dx = tx - rs.head.x, dy = ty - rs.head.y;
     if(Math.hypot(dx, dy) > 250){
@@ -2246,6 +2266,21 @@ function netFrame(t){
 function handleNetDeath(msg){
   sfx.play('death');
   document.getElementById('killLine').textContent = msg.killerName ? ('Cut off by ' + msg.killerName) : 'Ran into the wall';
+  // Stop your snake exactly where the server says its edge touched the other snake. (The page draws a little ahead of the
+  // last update, so left alone the head would carry on a few units INTO the snake while the screen fades.)
+  if(player && Number.isFinite(msg.x) && Number.isFinite(msg.y)){
+    player.head.x = msg.x; player.head.y = msg.y;
+    if(Number.isFinite(msg.angle)) player.angle = msg.angle;
+    if(player.raw && player.raw.length){ player.raw[0].x = msg.x; player.raw[0].y = msg.y; }
+    const count = Math.max(4, Math.round(player.length / CFG.POINT_SPACING));
+    const pts = resamplePath(player.raw, CFG.POINT_SPACING, count);
+    if(pts.length >= 2) player.points = pts;
+    player.frozen = true;
+  }
+  // Everyone else is placed where the server had them in the tick of the hit (the last update plus one tick) and then held,
+  // so what you see touching on the fade is exactly what touched. (Otherwise the snake you hit carries on and slides over you.)
+  netInterpolate(0.001, 1 / (CFG.TICK_RATE || 30));
+  worldFrozen = true;
   pendingDeath = msg;
   deathOutro.active = true;
   deathOutro.t = 0;
