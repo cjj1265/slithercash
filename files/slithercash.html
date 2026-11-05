@@ -1420,58 +1420,47 @@ function drawBackground(){
   ctx.stroke();
 }
 
+/* Orbs are drawn once into two small pictures and then stamped: building a gradient (and, for the cash bundles, a
+   glow) for every orb every frame was one of the slowest things on a busy map. */
+const orbSprites = (function(){
+  function make(size, draw){ const c = document.createElement('canvas'); c.width = c.height = size; draw(c.getContext('2d'), size / 2); return c; }
+  const SMALL_R = 19, BUNDLE_R = 25;   // the orb radius, and the bundle's "rad" (its width is 1.9 x that), in the picture's pixels
+  const small = make(64, (g, m)=>{
+    g.beginPath(); g.fillStyle = 'rgba(0,0,0,0.28)'; g.ellipse(m + SMALL_R*0.15, m + SMALL_R*0.45, SMALL_R*0.85, SMALL_R*0.4, 0, 0, Math.PI*2); g.fill();
+    const gr = g.createRadialGradient(m - SMALL_R*0.35, m - SMALL_R*0.35, SMALL_R*0.1, m, m, SMALL_R);
+    gr.addColorStop(0, '#ffedb0'); gr.addColorStop(0.55, '#f0c24a'); gr.addColorStop(1, '#8a6316');
+    g.beginPath(); g.fillStyle = gr; g.arc(m, m, SMALL_R, 0, Math.PI*2); g.fill();
+    g.beginPath(); g.strokeStyle = 'rgba(0,0,0,0.32)'; g.lineWidth = 2; g.arc(m, m, SMALL_R, 0, Math.PI*2); g.stroke();
+  });
+  const bundle = make(112, (g, m)=>{
+    const rad = BUNDLE_R, w = rad*1.9, h = rad*1.3, rr = Math.min(6, h*0.35);
+    g.beginPath(); g.fillStyle = 'rgba(0,0,0,0.28)'; g.ellipse(m + rad*0.15, m + rad*0.45, rad*0.85, rad*0.4, 0, 0, Math.PI*2); g.fill();
+    g.save(); g.shadowColor = 'rgba(240,194,74,0.7)'; g.shadowBlur = 14;
+    const gr = g.createLinearGradient(m - w/2, m - h/2, m + w/2, m + h/2);
+    gr.addColorStop(0, '#fff3b0'); gr.addColorStop(0.5, '#f0c24a'); gr.addColorStop(1, '#a97c22');
+    g.beginPath(); g.moveTo(m - w/2 + rr, m - h/2);
+    g.arcTo(m + w/2, m - h/2, m + w/2, m + h/2, rr); g.arcTo(m + w/2, m + h/2, m - w/2, m + h/2, rr);
+    g.arcTo(m - w/2, m + h/2, m - w/2, m - h/2, rr); g.arcTo(m - w/2, m - h/2, m + w/2, m - h/2, rr);
+    g.closePath(); g.fillStyle = gr; g.fill(); g.restore();
+    g.strokeStyle = 'rgba(36,26,8,0.4)'; g.lineWidth = 1.5; g.stroke();
+  });
+  return { small, bundle, SMALL_R, BUNDLE_R };
+})();
+
 function drawOrbs(){
   const half = Math.max(canvas.width,canvas.height)/camera.zoom;
+  const t = world.elapsed, z = camera.zoom, S = orbSprites;
   for(const o of world.orbs){
     if(Math.abs(o.x-camera.x) > half || Math.abs(o.y-camera.y) > half) continue;
     const p = worldToScreen(o.x,o.y);
+    if(p.x<-30||p.x>canvas.width+30||p.y<-30||p.y>canvas.height+30) continue;
     const big = o.value>1;
-    const pulse = 1 + Math.sin(world.elapsed*(big?3:4) + o.phase)*(big?0.16:0.08);
-    const rad = (big ? 7 : 4.5) * camera.zoom * pulse;
-
-    if(p.x<-20||p.x>canvas.width+20||p.y<-20||p.y>canvas.height+20) continue;
-
-    ctx.beginPath();
-    ctx.fillStyle = 'rgba(0,0,0,0.28)';
-    ctx.ellipse(p.x+rad*0.15, p.y+rad*0.45, rad*0.85, rad*0.4, 0, 0, Math.PI*2);
-    ctx.fill();
-
-    if(big){
-      // rare cash bundle: rounded rect + glow
-      ctx.save();
-      ctx.shadowColor = 'rgba(240,194,74,0.7)';
-      ctx.shadowBlur = 10*camera.zoom*pulse;
-      const w = rad*1.9, h = rad*1.3;
-      const rr = Math.min(4*camera.zoom, h*0.35);
-      const g = ctx.createLinearGradient(p.x-w/2,p.y-h/2,p.x+w/2,p.y+h/2);
-      g.addColorStop(0,'#fff3b0'); g.addColorStop(0.5,'#f0c24a'); g.addColorStop(1,'#a97c22');
-      ctx.beginPath();
-      ctx.moveTo(p.x-w/2+rr, p.y-h/2);
-      ctx.arcTo(p.x+w/2,p.y-h/2, p.x+w/2,p.y+h/2, rr);
-      ctx.arcTo(p.x+w/2,p.y+h/2, p.x-w/2,p.y+h/2, rr);
-      ctx.arcTo(p.x-w/2,p.y+h/2, p.x-w/2,p.y-h/2, rr);
-      ctx.arcTo(p.x-w/2,p.y-h/2, p.x+w/2,p.y-h/2, rr);
-      ctx.closePath();
-      ctx.fillStyle = g;
-      ctx.fill();
-      ctx.restore();
-      ctx.strokeStyle = 'rgba(36,26,8,0.4)'; ctx.lineWidth = Math.max(1,camera.zoom*0.7); ctx.stroke();
-    } else {
-      const g = ctx.createRadialGradient(p.x-rad*0.35, p.y-rad*0.35, rad*0.1, p.x, p.y, rad);
-      g.addColorStop(0,'#ffedb0'); g.addColorStop(0.55,'#f0c24a'); g.addColorStop(1,'#8a6316');
-      ctx.beginPath();
-      ctx.fillStyle = g;
-      ctx.arc(p.x,p.y,rad,0,Math.PI*2);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.strokeStyle = 'rgba(0,0,0,0.32)';
-      ctx.lineWidth = Math.max(1, camera.zoom*0.7);
-      ctx.arc(p.x,p.y,rad,0,Math.PI*2);
-      ctx.stroke();
-    }
+    const pulse = 1 + Math.sin(t*(big?3:4) + o.phase)*(big?0.16:0.08);
+    const rad = (big ? 7 : 4.5) * z * pulse;
+    if(big){ const k = rad / S.BUNDLE_R, size = 112 * k; ctx.drawImage(S.bundle, p.x - size/2, p.y - size/2, size, size); }
+    else { const k = rad / S.SMALL_R, size = 64 * k; ctx.drawImage(S.small, p.x - size/2, p.y - size/2, size, size); }
   }
 }
-
 function drawSmoothPath(pctx, pts){
   const L = pts.length;
   if(L < 2){ pctx.moveTo(pts[0].x, pts[0].y); pctx.lineTo(pts[0].x, pts[0].y); return; }
@@ -1552,9 +1541,8 @@ function drawSkinExtras(c, pts, r, skin){
   const t = performance.now() / 1000;
   if(skin.aura){
     c.save();
-    c.shadowColor = skin.glow; c.shadowBlur = (9 + 5 * Math.sin(t * 3.2)) * Math.max(0.6, r / 12);
-    c.globalAlpha = 0.28; c.lineJoin = 'round'; c.lineCap = 'round';
-    c.beginPath(); drawSmoothPath(c, pts); c.strokeStyle = skin.glow; c.lineWidth = r * 1.1; c.stroke();
+    c.globalAlpha = 0.12 + 0.05 * Math.sin(t * 3.2); c.lineJoin = 'round'; c.lineCap = 'round';
+    c.beginPath(); drawSmoothPath(c, pts); c.strokeStyle = skin.glow; c.lineWidth = r * 2.7; c.stroke(); // a wide faint stroke: no blur filter
     c.restore();
   }
   if(skin.sparkle && pts.length > 4 && r > 4){
@@ -1590,13 +1578,21 @@ function drawSnake(snake){
   }
 }
 
+/* How much shading each snake gets this frame: fewer passes when many snakes are on screen (set in draw()). */
+let snakeQuality = 2;
+
 function drawSnakeBody(snake){
   const pts = snake.points;
   if(pts.length<2) return;
-  const r = radiusFor(snake) * camera.zoom;
-
+  const wr = radiusFor(snake), r = wr * camera.zoom;
+  const skin = SKINS[snake.skinIndex] || SKINS[0];
+  const simple = !skin.colorAt && skin.colors.length === 1;
+  // A plain-coloured body does not need a point every 4 units: one every few is just as smooth and far cheaper.
+  // (Patterned skins colour by point, so they keep every point.)
+  const stride = simple ? Math.max(1, Math.round(wr / 6)) : 1;
   const screenPts = [worldToScreen(snake.head.x, snake.head.y)];
-  for(let i=0;i<pts.length;i++) screenPts.push(worldToScreen(pts[i].x, pts[i].y));
+  for(let i = 0; i < pts.length; i += stride) screenPts.push(worldToScreen(pts[i].x, pts[i].y));
+  if(stride > 1 && (pts.length - 1) % stride) screenPts.push(worldToScreen(pts[pts.length - 1].x, pts[pts.length - 1].y));
 
   // Level of detail: tiny/far-away snakes get a single cheap stroke instead
   // of the full multi-pass shading — keeps frame time down when zoomed out
@@ -1612,53 +1608,51 @@ function drawSnakeBody(snake){
     return;
   }
 
-  const castShadowPts = screenPts.map(p=>({x:p.x + r*0.32, y:p.y + r*0.5}));
-  const shadowPts = screenPts.map(p=>({x:p.x, y:p.y + r*0.26}));
-  const highlightPts = screenPts.map(p=>({x:p.x, y:p.y - r*0.34}));
-  const specularPts = screenPts.map(p=>({x:p.x - r*0.12, y:p.y - r*0.5}));
-
-  // soft cast shadow onto the ground beneath the whole body (light from upper-left)
-  ctx.beginPath(); drawSmoothPath(ctx, castShadowPts);
-  ctx.strokeStyle = 'rgba(0,0,0,0.16)';
-  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-  ctx.lineWidth = r*2.1;
-  ctx.stroke();
-
+  // The curve is built once and stroked for every pass, moved with translate() instead of rebuilding shifted copies.
+  const path = new Path2D();
+  drawSmoothPath(path, screenPts);
+  const q = snakeQuality;
   ctx.save();
   ctx.lineJoin = 'round'; ctx.lineCap = 'round';
 
-  // dark outline for definition
-  ctx.beginPath(); drawSmoothPath(ctx, screenPts);
-  ctx.strokeStyle = 'rgba(0,0,0,0.45)'; ctx.lineWidth = r*2 + 3; ctx.stroke();
-
-  // underside tube shade
-  ctx.beginPath(); drawSmoothPath(ctx, shadowPts);
-  ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = r*1.15; ctx.stroke();
-
-  const skin = SKINS[snake.skinIndex] || SKINS[0];
-  paintBody(ctx, screenPts, r, skin, snake.colorSeed || 0);
-  drawSkinExtras(ctx, screenPts, r, skin);
-
-  // broad top-lit highlight (rounds the tube)
-  ctx.beginPath(); drawSmoothPath(ctx, highlightPts);
-  ctx.strokeStyle = snake.boosting ? 'rgba(255,255,255,0.34)' : 'rgba(255,255,255,0.18)';
-  ctx.lineWidth = Math.max(1, r*0.55); ctx.stroke();
-
-  // crisp specular shine line for a glossy, classic snake-game finish
-  ctx.beginPath(); drawSmoothPath(ctx, specularPts);
-  ctx.strokeStyle = snake.boosting ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.32)';
-  ctx.lineWidth = Math.max(0.8, r*0.18); ctx.stroke();
-
-  if(snake.boosting && r > 3){
-    ctx.save();
-    ctx.shadowColor = snake.glow; ctx.shadowBlur = 14 * camera.zoom;
-    ctx.globalAlpha = 0.55;
-    ctx.beginPath(); drawSmoothPath(ctx, screenPts);
-    ctx.strokeStyle = snake.glow; ctx.lineWidth = r*1.15; ctx.stroke();
+  if(q >= 2){ // soft cast shadow onto the ground beneath the whole body (light from upper-left)
+    ctx.save(); ctx.translate(r*0.32, r*0.5);
+    ctx.strokeStyle = 'rgba(0,0,0,0.16)'; ctx.lineWidth = r*2.1; ctx.stroke(path);
     ctx.restore();
   }
-  ctx.restore();
 
+  // dark outline for definition
+  ctx.strokeStyle = 'rgba(0,0,0,0.45)'; ctx.lineWidth = r*2 + 3; ctx.stroke(path);
+
+  if(q >= 1){ // underside tube shade
+    ctx.save(); ctx.translate(0, r*0.26);
+    ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = r*1.15; ctx.stroke(path);
+    ctx.restore();
+  }
+
+  if(simple){ ctx.strokeStyle = skin.colors[0]; ctx.lineWidth = r*2; ctx.stroke(path); }
+  else paintBody(ctx, screenPts, r, skin, snake.colorSeed || 0);
+  drawSkinExtras(ctx, screenPts, r, skin);
+
+  if(q >= 1){ // broad top-lit highlight (rounds the tube)
+    ctx.save(); ctx.translate(0, -r*0.34);
+    ctx.strokeStyle = snake.boosting ? 'rgba(255,255,255,0.34)' : 'rgba(255,255,255,0.18)';
+    ctx.lineWidth = Math.max(1, r*0.55); ctx.stroke(path);
+    ctx.restore();
+  }
+
+  if(q >= 2){ // crisp specular shine line for a glossy, classic snake-game finish
+    ctx.save(); ctx.translate(-r*0.12, -r*0.5);
+    ctx.strokeStyle = snake.boosting ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.32)';
+    ctx.lineWidth = Math.max(0.8, r*0.18); ctx.stroke(path);
+    ctx.restore();
+  }
+
+  if(snake.boosting && r > 3){ // a soft glow while boosting (a wide faint stroke: a blur filter per snake is far too slow)
+    ctx.globalAlpha = 0.2;
+    ctx.strokeStyle = snake.glow; ctx.lineWidth = r*2.8; ctx.stroke(path);
+  }
+  ctx.restore();
   const hp = screenPts[0];
 
   // glossy rounded head cap
@@ -1715,8 +1709,19 @@ function drawParticles(){
 function draw(){
   drawBackground();
   drawOrbs();
-  const sorted = world.snakes.slice().sort((a,b)=> radiusFor(a)-radiusFor(b));
-  for(const s of sorted){ if(s.alive) drawSnake(s); }
+  // Only the snakes that can be on screen are drawn, and the shading per snake drops as their number goes up.
+  const hw = canvas.width / (2 * camera.zoom), hh = canvas.height / (2 * camera.zoom);
+  const left = camera.x - hw, right = camera.x + hw, top = camera.y - hh, bottom = camera.y + hh;
+  const visible = [];
+  for(const s of world.snakes){
+    if(!s.alive) continue;
+    const b = s.bbox, m = radiusFor(s) * 2 + 60;
+    if(b && s !== player && (b.maxX + m < left || b.minX - m > right || b.maxY + m < top || b.minY - m > bottom)) continue;
+    visible.push(s);
+  }
+  snakeQuality = visible.length > 35 ? 0 : visible.length > 20 ? 1 : 2;
+  visible.sort((a,b)=> radiusFor(a)-radiusFor(b));
+  for(const s of visible) drawSnake(s);
   drawParticles();
   drawMinimap();
 }
@@ -1961,7 +1966,9 @@ function clearGameCanvas(){
 let ws = null;
 let netYouId = null;
 let netSnakes = new Map(); // id -> render-snake object, same shape drawSnake()/HUD already expect
-let netOrbsRaw = [];
+let netOrbs = [];          // the orbs from the latest snapshot, already in the shape the drawing wants
+let netRttMs = 0;         // round trip to the server, smoothed; used to draw snakes where the server has them now
+let netPingTimer = null;
 let playerBestRank = 999;
 let pendingDeath = null;
 let lastInputSent = 0;
@@ -2006,6 +2013,9 @@ function connectAndJoin(name, buyin, skinIndex){
         }
         spawnedAt = performance.now();
         mySfx.len = null; mySfx.prot = false;
+        netRttMs = 0; clearInterval(netPingTimer);
+        const ping = ()=>{ if(sock.readyState === WebSocket.OPEN) sock.send(JSON.stringify({ t:'ping', ts: performance.now() })); };
+        ping(); netPingTimer = setInterval(ping, 2000);
         resolve();
         return;
       }
@@ -2022,6 +2032,7 @@ function connectAndJoin(name, buyin, skinIndex){
 }
 
 function netDisconnect(){
+  clearInterval(netPingTimer); netPingTimer = null;
   if(ws){ try{ ws.close(); }catch(e){} ws = null; }
   netYouId = null;
   netSnakes.clear();
@@ -2032,10 +2043,15 @@ function handleNetMessage(msg){
   else if(msg.t === 'death') handleNetDeath(msg);
   else if(msg.t === 'cashout_result') handleNetCashout(msg);
   else if(msg.t === 'kill') sfx.play('kill');
+  else if(msg.t === 'pong' && typeof msg.ts === 'number'){
+    const rtt = performance.now() - msg.ts;
+    if(rtt >= 0 && rtt < 3000) netRttMs = netRttMs ? netRttMs * 0.7 + rtt * 0.3 : rtt;
+  }
 }
 
 function applySnapshot(msg){
-  netOrbsRaw = msg.orbs || [];
+  netOrbs = (msg.orbs || []).map(o => ({ x:o.x, y:o.y, value:o.v, phase:(o.x*0.13+o.y*0.07) % (Math.PI*2) }));
+  const snapAt = performance.now();
   const seen = new Set();
   for(const s of (msg.snakes || [])){
     seen.add(s.id);
@@ -2050,11 +2066,12 @@ function applySnapshot(msg){
         raw: [{ x: s.x, y: s.y }],
         length: s.length, buyin: s.length / CFG.LEN_PER_DOLLAR, coinsEaten: 0,
         boosting: s.boosting, bestRank: 999, colorSeed: s.colorSeed,
-        netX: s.x, netY: s.y, netAngle: s.angle,
+        netX: s.x, netY: s.y, netAngle: s.angle, snapAt, speed: CFG.NORMAL_SPEED,
       };
       netSnakes.set(s.id, rs);
     }
     rs.netX = s.x; rs.netY = s.y; rs.netAngle = s.angle;
+    rs.snapAt = snapAt; rs.speed = CFG.NORMAL_SPEED * (s.boosting ? CFG.BOOST_MULT : 1);
     rs.length = s.length; rs.boosting = s.boosting; rs.name = s.name;
     rs.prot = !!s.prot; // spawn protection: shown as a pulsing shield
     if(s.id === netYouId){
@@ -2107,15 +2124,21 @@ function resamplePath(raw, spacing, count){
 }
 
 function netInterpolate(dt){
-  const posT = 1 - Math.exp(-14 * dt);  // frame-rate independent easing
+  const posT = 1 - Math.exp(-22 * dt);  // frame-rate independent easing
   const angT = 1 - Math.exp(-14 * dt);
+  // The server has moved on since each snapshot was made: by the time since it arrived, plus half the round trip (the
+  // time it took to get here). Each snake is drawn where the server has it NOW, so what you see touching is what the
+  // server sees touching. (Before, everything was drawn a little behind, so you could die before reaching something.)
+  const now = performance.now(), oneWay = clamp(netRttMs / 2000, 0, 0.2);
 
   for(const rs of netSnakes.values()){
-    const dx = rs.netX - rs.head.x, dy = rs.netY - rs.head.y;
+    const ahead = Math.min(0.35, (now - rs.snapAt) / 1000 + oneWay);
+    const tx = rs.netX + Math.cos(rs.netAngle) * rs.speed * ahead, ty = rs.netY + Math.sin(rs.netAngle) * rs.speed * ahead;
+    const dx = tx - rs.head.x, dy = ty - rs.head.y;
     if(Math.hypot(dx, dy) > 250){
       // spawn / large correction — snap, and reset the trail so it doesn't
       // stretch a straight line across the map
-      rs.head.x = rs.netX; rs.head.y = rs.netY;
+      rs.head.x = tx; rs.head.y = ty;
       rs.raw = [{ x: rs.head.x, y: rs.head.y }];
     } else {
       rs.head.x += dx * posT; rs.head.y += dy * posT;
@@ -2148,6 +2171,10 @@ function netInterpolate(dt){
 
     rs.points = resamplePath(rs.raw, CFG.POINT_SPACING, targetCount);
     if(rs.points.length < 2) rs.points = [{ x: rs.head.x, y: rs.head.y }, { x: rs.head.x, y: rs.head.y }];
+    // where the snake is, for skipping the ones that are off screen
+    let minX = rs.head.x, maxX = minX, minY = rs.head.y, maxY = minY;
+    for(const q of rs.points){ if(q.x < minX) minX = q.x; else if(q.x > maxX) maxX = q.x; if(q.y < minY) minY = q.y; else if(q.y > maxY) maxY = q.y; }
+    rs.bbox = { minX, maxX, minY, maxY };
   }
 }
 
@@ -2171,7 +2198,7 @@ function sendInputThrottled(angle, boostingFlag){
 function netUpdate(dt){
   world.elapsed += dt;
   netInterpolate(dt);
-  world.orbs = netOrbsRaw.map(o => ({ x:o.x, y:o.y, value:o.v, phase:(o.x*0.13+o.y*0.07) % (Math.PI*2) }));
+  world.orbs = netOrbs;
   world.snakes = Array.from(netSnakes.values());
   if(netYouId) player = netSnakes.get(netYouId) || player;
 
