@@ -319,13 +319,13 @@ class GameWorld {
 
         const ratio = a.length / b.length;
         if (ratio > 1.05) {
-          if (!doomed.has(b.id)) { doomed.add(b.id); deaths.push([b, a.name]); }
+          if (!doomed.has(b.id)) { doomed.add(b.id); deaths.push([b, a.name, a.id]); }
         } else if (ratio < 0.95) {
-          if (!doomed.has(a.id)) { doomed.add(a.id); deaths.push([a, b.name]); }
+          if (!doomed.has(a.id)) { doomed.add(a.id); deaths.push([a, b.name, b.id]); }
         } else {
           // near-identical size: mutual destruction
-          if (!doomed.has(a.id)) { doomed.add(a.id); deaths.push([a, b.name]); }
-          if (!doomed.has(b.id)) { doomed.add(b.id); deaths.push([b, a.name]); }
+          if (!doomed.has(a.id)) { doomed.add(a.id); deaths.push([a, b.name, b.id]); }
+          if (!doomed.has(b.id)) { doomed.add(b.id); deaths.push([b, a.name, a.id]); }
         }
       }
     }
@@ -349,7 +349,7 @@ class GameWorld {
     if (this.orbs.length > CFG.ORB_CAP) this.orbs.splice(0, this.orbs.length - CFG.ORB_CAP);
   }
 
-  _kill(snake, killerName) {
+  _kill(snake, killerName, killerId) {
     snake.alive = false;
     // The whole stake goes back on the map: the orbs together are worth exactly the snake's length
     // (an orb of value v adds GROW_PER_ORB * v length). Nothing vanishes with a death, so the only
@@ -362,6 +362,12 @@ class GameWorld {
       this.orbs.push(spawnOrb(p.x + rand(-8, 8), p.y + rand(-8, 8), perOrb));
     }
     if (this.orbs.length > CFG.ORB_CAP) this.orbs.splice(0, this.orbs.length - CFG.ORB_CAP);
+
+    // The killer (if a player) is told, so the page can play its kill sound.
+    if (killerId !== undefined && killerId !== snake.id) {
+      const k = this.snakes.get(killerId);
+      if (k && k.isPlayer) this.events.push({ type: 'kill', targetId: killerId, data: { victim: snake.name } });
+    }
 
     if (snake.isPlayer) {
       this.events.push({
@@ -389,8 +395,8 @@ class GameWorld {
 
     // Head-to-head first, so a face-to-face meeting is judged by size rather
     // than both snakes registering a "body hit" on each other and both dying.
-    for (const [victim, killerName] of this._resolveHeadOnCollisions()) {
-      if (victim.alive) this._kill(victim, killerName);
+    for (const [victim, killerName, killerId] of this._resolveHeadOnCollisions()) {
+      if (victim.alive) this._kill(victim, killerName, killerId);
     }
 
     for (const s of Array.from(this.snakes.values())) {
@@ -401,7 +407,7 @@ class GameWorld {
       const killerId = this._isProtected(s) ? null : this._checkCollision(s);
       if (killerId !== null) {
         const killer = this.snakes.get(killerId);
-        this._kill(s, killer ? killer.name : null);
+        this._kill(s, killer ? killer.name : null, killer ? killer.id : undefined);
       } else {
         const alive = Array.from(this.snakes.values()).filter(x => x.alive).sort((a, b) => b.length - a.length);
         const rank = alive.indexOf(s) + 1;

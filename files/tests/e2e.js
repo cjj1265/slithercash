@@ -579,6 +579,7 @@ const errOf = (state) => (state.msgs.find((m) => m.t === 'error') || {}).message
     await sleep(80);
   }
   check('the smaller snake died in the head-on fight', cDied);
+  check('the winner was told about the kill (for the kill sound)', d.msgs.some((m) => m.t === 'kill' && typeof m.victim === 'string'), d.msgs.map((m) => m.t));
   check('the loser was told, and forfeited the stake', cDied && near((await balanceOf(pidC)).sol, 0.05), await balanceOf(pidC));
 
   if (cDied) {

@@ -34,6 +34,7 @@
 //     { t:"snapshot",       youId, snakes:[...], orbs:[...], elapsed }
 //     { t:"death",          killerName, buyin, bestRank, coinsEaten }
 //     { t:"cashout_result", amount, buyin, bestRank, coinsEaten }
+//     { t:"kill",           victim }                   // you killed someone (for the kill sound)
 //     { t:"pong",           ts }
 //     { t:"error",          message }
 
@@ -680,6 +681,11 @@ function clampNum(v, min, max, fallback) {
 function drainEvents(world) {
   if (world.events.length === 0) return;
   for (const evt of world.events) {
+    if (evt.type === 'kill') { // a player made a kill: tell them, nothing to settle
+      const ks = findSessionByPlayerId(evt.targetId);
+      if (ks) ks.conn.send({ t: 'kill', victim: evt.data.victim });
+      continue;
+    }
     // Settle the stake first, even if the socket is already gone.
     const stake = walletByPlayer.get(evt.targetId);
     if (stake) {

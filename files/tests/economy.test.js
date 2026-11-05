@@ -73,6 +73,10 @@ for (const buyin of [CFG.MIN_BUYIN, 2.5, 5, 123.45]) {
     return g;
   };
   results.push(['a protected snake survives a head-on meeting with a bigger one, and does not kill it', head(true).snakes.has('small') && head(true).snakes.has('big')]);
+  const told = (g) => g.events.some((e) => e.type === 'kill' && e.targetId === 'big' && e.data.victim === 'small');
+  results.push(['a player who kills with their body is told (for the kill sound)', told(spot(false))]);
+  results.push(['a player who wins a head-on is told too', told(head(false))]);
+  results.push(['nobody is told about a kill when the other snake was protected', !told(spot(true)) && !told(head(true))]);
   w = fresh(); w.setInput('p', 0, true); results.push(['boosting ends spawn protection', !w._isProtected(w.snakes.get('p'))]);
   w = fresh(); run(w, CFG.SPAWN_PROTECT_SEC + 0.2, null); results.push(['protection ends after the set time', !w._isProtected(w.snakes.get('p'))]);
   w = fresh(); results.push(['a fresh snake is protected', w._isProtected(w.snakes.get('p')) && w.snapshot().snakes[0].prot === 1]);
