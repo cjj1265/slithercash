@@ -475,6 +475,24 @@
   .sound-btn.muted{ color:var(--dim); }
   #cashOutWrap{ display:flex; align-items:center; gap:10px; }
   .hud-sound{ background:rgba(10,14,12,0.55); backdrop-filter:blur(6px); }
+  /* ---------- Demo mode (local only) ---------- */
+  .demo-panel{ position:absolute; left:28px; top:84px; width:236px; padding:16px; border-radius:16px; z-index:3; display:flex; flex-direction:column; gap:6px;
+    background:rgba(18,24,22,0.92); border:1px solid rgba(240,194,74,0.35); box-shadow:0 14px 40px rgba(0,0,0,0.5); text-align:left; }
+  .demo-panel[hidden], .demo-badge[hidden]{ display:none; }
+  .demo-title{ font-style:italic; font-weight:900; font-size:16px; color:var(--gold-bright); letter-spacing:0.5px; }
+  .demo-title span{ font-style:normal; font-weight:600; font-size:11px; color:var(--dim); margin-left:6px; letter-spacing:1px; text-transform:uppercase; }
+  .demo-panel label{ margin-top:6px; font-size:10.5px; letter-spacing:1.4px; text-transform:uppercase; color:var(--dim); font-weight:700; }
+  .demo-panel input[type=number], .demo-panel select{ width:100%; padding:9px 10px; border-radius:8px; border:1px solid var(--hairline); background:rgba(255,255,255,0.05); color:var(--white-muted); font:inherit; font-weight:600; }
+  .demo-panel select option{ color:#111; }
+  .demo-panel button{ cursor:pointer; padding:8px 10px; border-radius:8px; border:1px solid rgba(240,194,74,0.4); background:rgba(240,194,74,0.12); color:var(--gold-bright); font:inherit; font-style:italic; font-weight:800; }
+  .demo-panel button:hover{ background:rgba(240,194,74,0.22); }
+  .demo-row{ display:flex; gap:6px; } .demo-row input{ flex:1; min-width:0; }
+  .demo-quick{ display:grid; grid-template-columns:repeat(4, 1fr); gap:5px; } .demo-quick button{ padding:6px 0; font-size:12px; }
+  .demo-check{ display:flex; align-items:center; gap:8px; text-transform:none !important; letter-spacing:0 !important; font-size:12px !important; color:var(--white-muted) !important; font-weight:600 !important; }
+  .demo-msg{ min-height:14px; font-size:11.5px; color:var(--dim); }
+  .demo-badge{ position:fixed; top:14px; left:50%; transform:translateX(-50%); z-index:30; pointer-events:none; padding:6px 14px; border-radius:999px;
+    font-style:italic; font-weight:800; font-size:12px; letter-spacing:1px; color:var(--gold-bright); background:rgba(10,14,12,0.7); border:1px solid rgba(240,194,74,0.4); }
+  body.demo #solConnectBtn, body.demo #solNote, body.demo #solPanel, body.demo .online-pill{ display:none !important; }
 </style>
 </head>
 <body>
@@ -501,6 +519,7 @@
   <ol id="lbList"></ol>
 </div>
 
+<div class="demo-badge" id="demoBadge" hidden>DEMO &middot; play money</div>
 <div id="cashOutWrap" class="hud-hidden">
   <button id="cashOutBtn" data-nosound>
     <span class="co-icon">$</span>
@@ -524,6 +543,21 @@
 <!-- Start screen -->
 <div id="startScreen" class="overlay hidden">
   <div class="brand-mark">snakepay<span>.lol</span></div>
+    <div class="demo-panel" id="demoPanel" hidden>
+    <div class="demo-title">DEMO MODE <span>play money</span></div>
+    <label>Add funds</label>
+    <div class="demo-row"><input id="demoFunds" type="number" min="1" step="1" value="1000"><button type="button" id="demoAddBtn">Add</button></div>
+    <div class="demo-quick"><button type="button" data-add="100">+100</button><button type="button" data-add="1000">+1K</button><button type="button" data-add="10000">+10K</button><button type="button" data-add="1000000">+1M</button></div>
+    <label>Bots</label>
+    <input id="demoBots" type="number" min="0" max="80" step="1" value="40">
+    <label>Bot size</label>
+    <select id="demoScale"><option value="1">Normal</option><option value="3">Big</option><option value="5">Huge</option></select>
+    <label>Arena</label>
+    <select id="demoRadius"><option value="1500">Small</option><option value="1800">Medium</option><option value="3700">Full size</option></select>
+    <label class="demo-check"><input type="checkbox" id="demoBadgeToggle" checked> Show the DEMO badge</label>
+    <button type="button" id="demoApplyBtn">Apply bots</button>
+    <div id="demoMsg" class="demo-msg"></div>
+  </div>
   <div class="social-links">
     <button type="button" class="sound-btn" aria-label="Sound on" data-nosound><svg viewBox="0 0 24 24" aria-hidden="true"><path class="spk" d="M3 9v6h4l5 4V5L7 9H3z"/><path class="waves" d="M15.5 8.5a5 5 0 010 7M18 6a8.5 8.5 0 010 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path class="cross" d="M16 9l5 6M21 9l-5 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
     <a href="https://www.tiktok.com/@snakepay.lol" target="_blank" rel="noopener noreferrer" aria-label="SnakePay on TikTok" title="TikTok">
@@ -1828,7 +1862,7 @@ const SKIN_TIER_LABEL = { common:'COMMON', rare:'RARE', epic:'EPIC', legendary:'
 const SKIN_TIER_COLOR = { common:'#9aa59d', rare:'#5aa9ff', epic:'#c77dff', legendary:'#f2c94c' };
 let skinPrices = { rare: 0.03, epic: 0.08, legendary: 0.25 }; // replaced by the server's current prices
 let ownedSkins = new Set();                                      // paid skins this wallet owns (from the server)
-const skinOwned = (i)=> SKINS[i].tier === 'common' || ownedSkins.has(i);
+const skinOwned = (i)=> SOL.demo || SKINS[i].tier === 'common' || ownedSkins.has(i);
 let selectedSkinIndex = 0;   // the skin being looked at
 let equippedSkinIndex = 0;   // the skin used to play
 try{ const s = parseInt(localStorage.getItem('sp_skin'), 10); if(Number.isInteger(s) && s >= 0 && s < SKINS.length) equippedSkinIndex = s; }catch(e){}
@@ -2515,11 +2549,16 @@ async function startGame(){
     return;
   }
 
+  if(SOL.demo){
+    if(buyin > wallet + 1e-9){ alert('Not enough demo funds for that buy-in. Add funds in the demo panel on the left.'); return; }
+    wallet -= buyin; saveWallet(); renderWalletUI();
+  }
   playBtn.disabled = true;
   playBtn.textContent = 'Connecting...';
   try{
     await connectAndJoin(name, buyin, usableSkin());
   }catch(err){
+    if(SOL.demo){ wallet += buyin; saveWallet(); renderWalletUI(); } // the game never started: give the buy-in back
     playBtn.disabled = false;
     playBtn.textContent = 'Buy In & Play';
     if(err.fromServer){ alert(err.message); netDisconnect(); solRefreshBalance(); return; }
@@ -2726,7 +2765,7 @@ function solUpdateUI(){
   if(rake > 0) rakeNote.textContent = 'House fee: ' + rake + '% of your profit when you cash out. Nothing if you cash out at your buy-in or less.';
   solPanel.classList.toggle('sol-hidden', !on);
   document.getElementById('walletLabel').textContent = on ? 'Wallet Balance' : 'Your Earnings';
-  document.getElementById('walletSub').textContent = on ? (solIsMain() ? 'SOL held by the game server' : 'Devnet SOL held by the game server') : 'Practice balance, saved on this device';
+  document.getElementById('walletSub').textContent = on ? (solIsMain() ? 'SOL held by the game server' : 'Devnet SOL held by the game server') : (SOL.demo ? 'Demo balance (play money)' : 'Practice balance, saved on this device');
   if(on){
     document.getElementById('solBalance').textContent = SOL.sol.toFixed(4) + ' SOL';
     // On devnet this row shows the play-money dollars. On mainnet it is hidden: the SOL line above is the truth.
@@ -2961,9 +3000,42 @@ function solInit(){
   solApplyNetwork();
   solUpdateUI();
   // Learn the network up front so the menu never says "Devnet" on a real-money server.
-  fetch('/api/config').then(r => r.json()).then(c => { SOL.walletOn = !!c.enabled; if(c.skinPrices) skinPrices = c.skinPrices; SOL.winsOn = !!c.winsEnabled; if(c.creditsPerSol) SOL.rate = c.creditsPerSol; solApplyNetwork(c.network); solUpdateUI(); }).catch(()=>{});
+  fetch('/api/config').then(r => r.json()).then(c => { SOL.walletOn = !!c.enabled; if(c.skinPrices) skinPrices = c.skinPrices; SOL.winsOn = !!c.winsEnabled; if(c.demo) setupDemo(); if(c.creditsPerSol) SOL.rate = c.creditsPerSol; solApplyNetwork(c.network); solUpdateUI(); }).catch(()=>{});
 }
 
+/* ============================== DEMO MODE (local only) ==============================
+   The server only says demo:true when it was started with `npm run demo` on this computer. The balance is play
+   money kept in this browser; a buy-in comes out of it and a cash-out goes back in. */
+const demoPanel = document.getElementById('demoPanel'), demoBadge = document.getElementById('demoBadge');
+const demoMsg = document.getElementById('demoMsg'), demoBadgeToggle = document.getElementById('demoBadgeToggle');
+function demoSay(t){ demoMsg.textContent = t; clearTimeout(demoSay.t); demoSay.t = setTimeout(()=>{ demoMsg.textContent = ''; }, 3500); }
+function demoAdd(n){
+  n = Math.floor(n); if(!(n > 0)){ demoSay('Enter an amount above 0.'); return; }
+  wallet = Math.min(1e12, wallet + n); saveWallet(); renderWalletUI(); demoSay('Added ' + fmtCash(n) + '.');
+}
+function setupDemo(){
+  if(SOL.demo) return;
+  SOL.demo = true;
+  document.body.classList.add('demo');
+  demoPanel.hidden = false; demoBadge.hidden = !demoBadgeToggle.checked;
+  const sub = document.getElementById('walletSub'); if(sub) sub.textContent = 'Demo balance (play money)';
+  fetch('/api/demo').then(r => r.json()).then(d => {
+    document.getElementById('demoBots').value = d.bots;
+    const near = (sel, v) => { let best = sel.options[0].value, gap = Infinity; for(const o of sel.options){ const g = Math.abs(Number(o.value) - v); if(g < gap){ gap = g; best = o.value; } } sel.value = best; };
+    near(document.getElementById('demoScale'), d.botScale); near(document.getElementById('demoRadius'), d.radius);
+  }).catch(()=>{});
+  refreshSkinAction();
+}
+document.getElementById('demoAddBtn').addEventListener('click', ()=> demoAdd(parseFloat(document.getElementById('demoFunds').value)));
+document.querySelectorAll('#demoPanel [data-add]').forEach(b => b.addEventListener('click', ()=> demoAdd(Number(b.dataset.add))));
+demoBadgeToggle.addEventListener('change', ()=>{ demoBadge.hidden = !demoBadgeToggle.checked; });
+document.getElementById('demoApplyBtn').addEventListener('click', async ()=>{
+  try{
+    const r = await solApi('/api/demo', { method: 'POST', body: JSON.stringify({
+      bots: Number(document.getElementById('demoBots').value), botScale: Number(document.getElementById('demoScale').value), radius: Number(document.getElementById('demoRadius').value) }) });
+    demoSay(r.bots + ' bots ready. A new arena size starts at the next game.');
+  }catch(e){ demoSay(e.message); }
+});
 /* ============================== LOADING SCREEN ============================== */
 function runLoadingScreen(){
   document.getElementById('loadingTip').textContent = LOADING_TIPS[(Math.random()*LOADING_TIPS.length)|0];
