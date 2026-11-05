@@ -36,7 +36,10 @@ const CFG = {
   BOOST_MULT: 1.9,
   TURN_RATE_BASE: 5.6,
   BOOST_DRAIN_INTERVAL: 0.11,
-  GRID_CELL: 46,
+  // A head dies the moment its drawn circle touches the other snake's drawn body (the radii as drawn, added). A smaller
+  // factor made players sink into a body before dying; the grid squares are wider than the biggest possible reach.
+  HIT_SCALE: 1.0,
+  GRID_CELL: 80,
   TICK_RATE: 30, // server ticks per second
   // A cash-out has to be held this long, staying on the map and killable the whole time, so nobody can
   // bail out the instant before dying. The server counts the time; the client only shows it.
@@ -300,7 +303,7 @@ class GameWorld {
     for (const s of this.snakes.values()) {
       if (!s.alive || this._isProtected(s)) continue; // a protected snake's body cannot hurt anyone
       const r = radiusFor(s);
-      for (let i = 0; i < s.points.length; i += 2) {
+      for (let i = 0; i < s.points.length; i++) { // every point (4 units apart), so the edge of the body is exact
         const p = s.points[i];
         const key = Math.floor(p.x / CFG.GRID_CELL) + ',' + Math.floor(p.y / CFG.GRID_CELL);
         let arr = this.grid.get(key);
@@ -325,7 +328,11 @@ class GameWorld {
         for (const entry of arr) {
           if (entry.ownerId === snake.id) continue;
           if (entry.isHead) continue; // handled by _checkHeadOn
-          const minDist = r * 0.72 + entry.r * 0.72;
+          // The grid was built at the start of the tick: a snake that has died since (killed head-on, say) is gone, and
+          // running into where it was must not kill you, or blame the wall.
+          const owner = this.snakes.get(entry.ownerId);
+          if (!owner || !owner.alive) continue;
+          const minDist = (r + entry.r) * CFG.HIT_SCALE;
           if (dist2(snake.head.x, snake.head.y, entry.x, entry.y) < minDist * minDist) return entry.ownerId;
         }
       }
@@ -348,7 +355,7 @@ class GameWorld {
         if (this._isProtected(a) || this._isProtected(b)) continue; // protected snakes pass through everyone
         if (doomed.has(a.id) && doomed.has(b.id)) continue;
         const ra = radiusFor(a), rb = radiusFor(b);
-        const minDist = ra * 0.72 + rb * 0.72;
+        const minDist = (ra + rb) * CFG.HIT_SCALE;
         if (dist2(a.head.x, a.head.y, b.head.x, b.head.y) >= minDist * minDist) continue;
 
         // Exactly one snake dies: the smaller one. When they are about the same size (within 5%) it is a coin flip,
@@ -397,12 +404,16 @@ class GameWorld {
    * on, so no orb (and no money) ever disappears. (The old limit of 700 deleted the oldest, which is why a dead
    * snake's orbs vanished a few seconds later on a busy map.)
    */
-  _dropOrb(orb) {
-    this.orbs.push(orb);
-    if (this.orbs.length > CFG.ORB_CAP) {
-      const merged = this.orbs.splice(0, this.orbs.length - CFG.ORB_CAP + 300);
-      for (const m of merged) this.orbs[(Math.random() * this.orbs.length) | 0].value += m.value;
-    }
+  _dropOrb(orb) { this.orbs.push(orb); }
+
+  /**
+   * Called once at the end of a tick, after eaten orbs are swept out (merging while some are still marked eaten would
+   * count their value twice). Past the limit the oldest orbs are merged into others, so no value is lost.
+   */
+  _enforceOrbCap() {
+    if (this.orbs.length <= CFG.ORB_CAP) return;
+    const merged = this.orbs.splice(0, this.orbs.length - CFG.ORB_CAP + 300);
+    for (const m of merged) this.orbs[(Math.random() * this.orbs.length) | 0].value += m.value;
   }
 
   _kill(snake, killerName, killerId) {
@@ -453,7 +464,8 @@ class GameWorld {
     // Head-to-head first, so a face-to-face meeting is judged by size rather
     // than both snakes registering a "body hit" on each other and both dying.
     for (const [victim, killerName, killerId] of this._resolveHeadOnCollisions()) {
-      if (victim.alive) this._kill(victim, killerName, killerId);
+      // In a three-way meeting the winner of one head-on can itself lose another; the victim still gets the winner's name, but a snake that is gone cannot be credited with a kill.
+      if (victim.alive) { const k = this.snakes.get(killerId); this._kill(victim, killerName, k && k.alive ? killerId : undefined); }
     }
 
     // Ranks by length, worked out once per tick (not once per snake).
@@ -475,6 +487,7 @@ class GameWorld {
     }
 
     if (this._anyEaten) { this.orbs = this.orbs.filter(o => !o.eaten); this._anyEaten = false; }
+    this._enforceOrbCap();
     this._buildOrbGrid();
 
     // Holds are settled last, so a snake that died this tick never gets paid.

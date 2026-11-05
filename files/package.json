@@ -12,7 +12,9 @@
     "test:ws": "node tests/ws.test.js",
     "test:wallet": "node tests/e2e.js",
     "test:demo": "node tests/demo.test.js",
-    "test:hitbox": "node tests/hitbox.test.js"
+    "test:hitbox": "node tests/hitbox.test.js",
+    "test:soak": "node tests/soak.test.js",
+    "test:netsoak": "node tests/netsoak.test.js"
   },
   "engines": {
     "node": ">=18"
