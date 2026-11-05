@@ -60,7 +60,7 @@ for (const buyin of [CFG.MIN_BUYIN, 2.5, 5, 123.45]) {
     big.protectedUntil = 0;
     for (let i = 0; i < 40; i++) g.tick(1 / 30);                       // the big snake grows a body
     const small = g.addPlayer({ id: 'small', name: 'small', buyin: 1, skinIndex: 0 });
-    if (!protectMe) small.protectedUntil = 0;
+    if (!protectMe) { small.protectedUntil = 0; small.spawnGrace = false; }
     small.head.x = big.points[6].x; small.head.y = big.points[6].y;     // right on the big snake's body
     small.points = [{ x: small.head.x, y: small.head.y }];
     g.tick(1 / 30);
@@ -71,7 +71,7 @@ for (const buyin of [CFG.MIN_BUYIN, 2.5, 5, 123.45]) {
   const head = (protectMe) => {
     const g = new GameWorld({ bots: 0 });
     const big = g.addPlayer({ id: 'big', name: 'big', buyin: 25, skinIndex: 0 }); big.protectedUntil = 0;
-    const small = g.addPlayer({ id: 'small', name: 'small', buyin: 1, skinIndex: 0 }); if (!protectMe) small.protectedUntil = 0;
+    const small = g.addPlayer({ id: 'small', name: 'small', buyin: 1, skinIndex: 0 }); if (!protectMe) { small.protectedUntil = 0; small.spawnGrace = false; }
     small.head.x = big.head.x; small.head.y = big.head.y;
     g.tick(1 / 30);
     return g;
