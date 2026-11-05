@@ -30,7 +30,11 @@ for (const buyin of [CFG.MIN_BUYIN, 2.5, 5, 123.45]) {
 // 2a) hold-to-cash-out: takes the full hold, can be cancelled, lapses without refreshes, and never pays a snake that died
 {
   const run = (w, seconds, each) => { for (let i = 0; i < Math.round(seconds * 30); i++) { if (each) each(i); w.tick(1 / 30); } };
-  const refresh = (w) => (i) => { if (i % 30 === 0) w.startCashout('p'); };
+  // keeps the hold going, and steers toward the middle so a long run never ends at the wall
+  const refresh = (w) => (i) => {
+    if (i % 30 === 0) w.startCashout('p');
+    const s = w.snakes.get('p'); if (s) w.setInput('p', Math.atan2(-s.head.y, -s.head.x), false);
+  };
   const paid = (w) => w.events.some((e) => e.type === 'cashout_result');
   const fresh = () => { const w = new GameWorld({ bots: 0 }); w.addPlayer({ id: 'p', name: 'p', buyin: 5, skinIndex: 0 }); return w; };
   const results = [];

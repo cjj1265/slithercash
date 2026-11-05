@@ -64,8 +64,17 @@ const CLIENT_HTML_PATH = path.join(__dirname, 'slithercash.html');
 // its snakes (and any bots) hold value nobody paid for; if they shared a map with real-money players,
 // a free snake could die next to a paying one and hand it orbs to cash out. Every unit of value in
 // realWorld was put there by a buy-in taken from a real balance, which is what the solvency check relies on.
+// DEMO_MODE is for showing the game off on your own computer (`npm run demo`): a play-money world with lots of big
+// bots, free food, and controls to change them. It never runs with a wallet, never on a host, and only answers
+// to this computer.
+const DEMO_MODE = process.env.DEMO_MODE === '1';
+if (DEMO_MODE && (process.env.GAME_WALLET_SECRET || process.env.RENDER || process.env.ALLOW_MAINNET)) {
+  console.error('[demo] DEMO_MODE is only for running on your own computer, with no wallet. Refusing to start.');
+  process.exit(1);
+}
+const DEMO_DEFAULTS = { bots: 40, botScale: 3, radius: 1800, ambientOrbs: 450 };
 const realWorld = new GameWorld({ bots: 0 });
-const practiceWorld = new GameWorld();
+const practiceWorld = DEMO_MODE ? new GameWorld(DEMO_DEFAULTS) : new GameWorld();
 const worlds = [realWorld, practiceWorld];
 
 /** connId -> { conn: WSConnection, playerId: string|null, world: GameWorld|null } */
@@ -186,12 +195,26 @@ async function handleApi(req, res) {
   try {
     const url = new URL(req.url, 'http://localhost');
     const route = req.method + ' ' + url.pathname;
-    const known = ['GET /api/config', 'GET /api/online', 'GET /api/login-challenge', 'POST /api/login', 'GET /api/player-deposit-address', 'GET /api/player-balance', 'POST /api/check-deposit', 'POST /api/withdraw', 'GET /api/skins', 'POST /api/buy-skin', 'POST /api/post-win'];
+    const known = ['GET /api/config', 'GET /api/online', 'GET /api/login-challenge', 'POST /api/login', 'GET /api/player-deposit-address', 'GET /api/player-balance', 'POST /api/check-deposit', 'POST /api/withdraw', 'GET /api/skins', 'POST /api/buy-skin', 'POST /api/post-win', 'GET /api/demo', 'POST /api/demo'];
     if (!known.includes(route)) { sendJson(res, 404, { error: 'Not found.' }); return; }
 
     // Public and harmless: lets the page say "Devnet" or not before anyone connects a wallet.
     if (route === 'GET /api/config') {
-      sendJson(res, 200, { enabled: wallet.isEnabled(), network: wallet.getNetwork(), creditsPerSol: wallet.CREDITS_PER_SOL, paused: wallet.isEnabled() ? wallet.isPaused() : false, skinPrices: wallet.getSkinPrices(), winsEnabled: wins.enabled() });
+      sendJson(res, 200, { enabled: wallet.isEnabled(), network: wallet.getNetwork(), creditsPerSol: wallet.CREDITS_PER_SOL, paused: wallet.isEnabled() ? wallet.isPaused() : false, skinPrices: wallet.getSkinPrices(), winsEnabled: wins.enabled(), demo: DEMO_MODE });
+      return;
+    }
+    // Demo controls (only exist in DEMO_MODE, which only answers to this computer): how many bots, how big, how big the arena.
+    if (route === 'GET /api/demo' || route === 'POST /api/demo') {
+      if (!DEMO_MODE) { sendJson(res, 404, { error: 'Not found.' }); return; }
+      if (route === 'POST /api/demo') {
+        const body = await readJson(req, 1024);
+        const count = clampNum(body.bots, 0, 80, practiceWorld.botCount);
+        const scale = clampNum(body.botScale, 0.5, 6, practiceWorld.botScale);
+        const radius = clampNum(body.radius, 1200, 3700, practiceWorld.pendingRadius || practiceWorld.radius);
+        practiceWorld.setBots(Math.round(count), scale);
+        if (Math.abs(radius - practiceWorld.radius) > 1) practiceWorld.setRadius(radius);
+      }
+      sendJson(res, 200, { bots: practiceWorld.botCount, botScale: practiceWorld.botScale, radius: practiceWorld.pendingRadius || practiceWorld.radius });
       return;
     }
     // Public: the "playing now" counter on the main screen. Just a number, no names or balances.
@@ -630,7 +653,7 @@ function handleMessage(connId, msg) {
         t: 'welcome',
         id: playerId,
         cfg: {
-          WORLD_RADIUS: CFG.WORLD_RADIUS, LEN_PER_DOLLAR: CFG.LEN_PER_DOLLAR, TICK_RATE: CFG.TICK_RATE,
+          WORLD_RADIUS: world.radius, LEN_PER_DOLLAR: CFG.LEN_PER_DOLLAR, TICK_RATE: CFG.TICK_RATE,
           CASHOUT_HOLD_SEC: CFG.CASHOUT_HOLD_SEC, MIN_PLAY_SEC: CFG.MIN_PLAY_SEC, SPAWN_PROTECT_SEC: CFG.SPAWN_PROTECT_SEC,
         },
       });
@@ -757,9 +780,10 @@ setInterval(() => {
   }
 }, TICK_MS);
 
-httpServer.listen(PORT, () => {
+httpServer.listen(...(DEMO_MODE ? [PORT, '127.0.0.1'] : [PORT]), () => {
   console.log(`SnakePay multiplayer server listening on :${PORT}`);
   console.log(`Healthcheck: http://localhost:${PORT}/health`);
+  if (DEMO_MODE) console.log('[demo] DEMO MODE: play money, ' + practiceWorld.botCount + ' bots, answering only on this computer. Open http://localhost:' + PORT);
   if (TRUST_CLOUDFLARE && !ORIGIN_SECRET) {
     console.warn('[security] TRUST_CLOUDFLARE is on but ORIGIN_SECRET is not set: anyone who reaches this server directly can forge their address and dodge the per-address limits. Set ORIGIN_SECRET.');
   }

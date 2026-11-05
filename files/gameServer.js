@@ -79,10 +79,10 @@ function radiusFor(snake) {
   return clamp(CFG.BASE_RADIUS + Math.sqrt(snake.length) * 0.62, CFG.BASE_RADIUS, 34);
 }
 
-function spawnOrb(x, y, value) {
+function spawnOrb(x, y, value, radius) {
   let px, py;
   if (x === undefined) {
-    const r = Math.sqrt(Math.random()) * (CFG.WORLD_RADIUS - 60);
+    const r = Math.sqrt(Math.random()) * ((radius || CFG.WORLD_RADIUS) - 60);
     const a = Math.random() * Math.PI * 2;
     px = Math.cos(a) * r; py = Math.sin(a) * r;
   } else { px = x; py = y; }
@@ -99,8 +99,32 @@ class GameWorld {
     this.grid = new Map();
     this.elapsed = 0;
     this.events = []; // { type, targetId, data } — drained by the server layer each tick
+    // Options that only the local demo uses: a smaller arena, food that appears from nowhere, bigger bots.
+    this.radius = (opts && opts.radius) || CFG.WORLD_RADIUS;
+    this.ambientOrbs = (opts && opts.ambientOrbs) || 0;
+    this.botScale = (opts && opts.botScale) || 1;
+    this.pendingRadius = 0;
     this.botCount = opts && opts.bots !== undefined ? opts.bots : CFG.NUM_BOTS;
     for (let i = 0; i < this.botCount; i++) this._spawnBot();
+  }
+
+  _bots() { return Array.from(this.snakes.values()).filter((s) => !s.isPlayer); }
+  _hasPlayers() { for (const s of this.snakes.values()) if (s.isPlayer) return true; return false; }
+
+  /** Replace all bots with count fresh ones; scale multiplies how big they start (demo only). */
+  setBots(count, scale) {
+    this.botScale = scale > 0 ? scale : this.botScale;
+    this.botCount = Math.max(0, Math.floor(count));
+    for (const b of this._bots()) this.snakes.delete(b.id);
+    for (let i = 0; i < this.botCount; i++) this._spawnBot();
+  }
+
+  /** A new arena size takes effect once nobody is playing in this world, so nobody is thrown out of the map. */
+  setRadius(r) { this.pendingRadius = r; }
+
+  _topUpOrbs() {
+    const need = Math.min(this.ambientOrbs, CFG.ORB_CAP) - this.orbs.length;
+    for (let i = 0; i < Math.min(need, 25); i++) this.orbs.push(spawnOrb(undefined, undefined, undefined, this.radius));
   }
 
   /** Total value in play, in credits: every live snake's length plus every orb. An upper bound on what can still be paid out. */
@@ -113,7 +137,7 @@ class GameWorld {
 
   _makeSnake({ id, name, isPlayer, skinIndex, startLen }) {
     const a = rand(0, Math.PI * 2);
-    const r = Math.sqrt(Math.random()) * (CFG.WORLD_RADIUS * (isPlayer ? 0.5 : 0.75));
+    const r = Math.sqrt(Math.random()) * (this.radius * (isPlayer ? 0.5 : 0.75));
     const ang = rand(0, Math.PI * 2);
     return {
       id, name, isPlayer, alive: true, bornAt: this.elapsed,
@@ -136,7 +160,7 @@ class GameWorld {
 
   _spawnBot() {
     const id = 'bot_' + (idCounter++);
-    const startLen = startLenForBuyin(randomBotBuyin());
+    const startLen = startLenForBuyin(randomBotBuyin() * this.botScale);
     const s = this._makeSnake({ id, name: randBotName(), isPlayer: false, skinIndex: (Math.random() * SKIN_COUNT) | 0, startLen });
     this.snakes.set(id, s);
   }
@@ -224,7 +248,7 @@ class GameWorld {
     const head = snake.head;
 
     const distFromCenter = Math.hypot(head.x, head.y);
-    if (distFromCenter > CFG.WORLD_RADIUS - 260) {
+    if (distFromCenter > this.radius - 260) {
       snake.targetAngle = Math.atan2(-head.y, -head.x);
       ai.wanderTimer = 0.4;
       return;
@@ -378,12 +402,16 @@ class GameWorld {
       this.snakes.delete(snake.id);
     } else {
       this.snakes.delete(snake.id);
-      setTimeout(() => { if (!this._stopped) this._spawnBot(); }, rand(1500, 3500));
+      setTimeout(() => { if (!this._stopped && this._bots().length < this.botCount) this._spawnBot(); }, rand(1500, 3500));
     }
   }
 
   tick(dt) {
     this.elapsed += dt;
+    if (this.pendingRadius && !this._hasPlayers()) { // a new arena size, applied between games
+      this.radius = this.pendingRadius; this.pendingRadius = 0; this.orbs.length = 0; this.setBots(this.botCount, this.botScale);
+    }
+    if (this.ambientOrbs) this._topUpOrbs();
 
     for (const s of this.snakes.values()) {
       if (!s.alive) continue;
@@ -403,7 +431,7 @@ class GameWorld {
       if (!s.alive) continue;
       this._checkOrbEating(s);
       const distFromCenter = Math.hypot(s.head.x, s.head.y);
-      if (distFromCenter > CFG.WORLD_RADIUS) { this._kill(s, null); continue; }
+      if (distFromCenter > this.radius) { this._kill(s, null); continue; }
       const killerId = this._isProtected(s) ? null : this._checkCollision(s);
       if (killerId !== null) {
         const killer = this.snakes.get(killerId);

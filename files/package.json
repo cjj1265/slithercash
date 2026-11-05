@@ -5,11 +5,13 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
+    "demo": "node demo.js",
     "test": "node test-client.js && node test-multi.js",
     "test:economy": "node tests/economy.test.js",
     "test:fee": "node -r ./tests/fake-preload.js tests/rake-test.js",
     "test:ws": "node tests/ws.test.js",
-    "test:wallet": "node tests/e2e.js"
+    "test:wallet": "node tests/e2e.js",
+    "test:demo": "node tests/demo.test.js"
   },
   "engines": {
     "node": ">=18"
