@@ -77,6 +77,7 @@ console.log('\n== orbs never vanish ==');
   const total = () => w.orbs.reduce((a, o) => a + o.value, 0);
   let put = 0;
   for (let i = 0; i < CFG.ORB_CAP + 2500; i++) { w._dropOrb({ x: (i % 90) * 10, y: Math.floor(i / 90) * 10, value: 1 }); put += 1; }
+  w._enforceOrbCap(); // done once at the end of every tick
   check('past the limit the oldest orbs are merged into others', w.orbs.length <= CFG.ORB_CAP, w.orbs.length);
   check('and the value is exactly what was put in', Math.abs(total() - put) < 1e-6, [total(), put]);
   const v = newWorld();

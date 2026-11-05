@@ -1722,6 +1722,11 @@ function draw(){
   snakeQuality = visible.length > 35 ? 0 : visible.length > 20 ? 1 : 2;
   visible.sort((a,b)=> radiusFor(a)-radiusFor(b));
   for(const s of visible) drawSnake(s);
+  // After you die the server removes you at once. Your snake stays drawn where it stopped (at the edge of what it hit)
+  // while the screen fades out, instead of vanishing and looking as if you had gone through the other snake.
+  if(deathOutro.active && player && player.alive && !world.snakes.includes(player)){
+    ctx.save(); ctx.globalAlpha = clamp(1 - Math.max(0, deathOutro.t - 0.35) / 0.8, 0, 1); drawSnake(player); ctx.restore();
+  }
   drawParticles();
   drawMinimap();
 }
