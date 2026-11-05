@@ -24,7 +24,8 @@ const CFG = {
   // Render's dashboard) to a number > 0 if you ever want the world seeded
   // with AI-controlled snakes again — no code change needed either way.
   NUM_BOTS: Number(process.env.NUM_BOTS) || 0,
-  ORB_CAP: 700,
+  ORB_CAP: 6000,      // a safety limit only: past it the oldest orbs are merged into others, never deleted
+  ORB_CELL: 64,       // size of the squares orbs are filed under (eating and per-player snapshots)
   LEN_PER_DOLLAR: 8,
   DEFAULT_BUYIN: 5,
   // Must be >= 8 / LEN_PER_DOLLAR: startLenForBuyin() floors the starting length at 8,
@@ -104,6 +105,7 @@ class GameWorld {
     this.ambientOrbs = (opts && opts.ambientOrbs) || 0;
     this.botScale = (opts && opts.botScale) || 1;
     this.pendingRadius = 0;
+    this.orbGrid = new Map();   // orbs filed by square, rebuilt at the end of every tick
     this.botCount = opts && opts.bots !== undefined ? opts.bots : CFG.NUM_BOTS;
     for (let i = 0; i < this.botCount; i++) this._spawnBot();
   }
@@ -124,7 +126,7 @@ class GameWorld {
 
   _topUpOrbs() {
     const need = Math.min(this.ambientOrbs, CFG.ORB_CAP) - this.orbs.length;
-    for (let i = 0; i < Math.min(need, 25); i++) this.orbs.push(spawnOrb(undefined, undefined, undefined, this.radius));
+    for (let i = 0; i < Math.min(need, 25); i++) this._dropOrb(spawnOrb(undefined, undefined, undefined, this.radius));
   }
 
   /** Total value in play, in credits: every live snake's length plus every orb. An upper bound on what can still be paid out. */
@@ -219,16 +221,24 @@ class GameWorld {
     const wantsBoost = snake.boosting && snake.length > CFG.MIN_LEN + 4;
     const speed = CFG.NORMAL_SPEED * (wantsBoost ? CFG.BOOST_MULT : 1);
 
+    const px = snake.head.x, py = snake.head.y;
     snake.head.x += Math.cos(snake.angle) * speed * dt;
     snake.head.y += Math.sin(snake.angle) * speed * dt;
 
-    snake.distSincePoint += speed * dt;
-    if (snake.distSincePoint >= CFG.POINT_SPACING) {
-      snake.distSincePoint = 0;
-      snake.points.unshift({ x: snake.head.x, y: snake.head.y });
+    // The body is a trail of points exactly POINT_SPACING apart along the path the head took (several points per
+    // tick when boosting). It used to add one point per tick, which spaced them speed*dt apart: a body up to twice
+    // as long as the one drawn, with an invisible tail you could die on and boost orbs falling far behind you.
+    const travel = speed * dt, SP = CFG.POINT_SPACING;
+    let toNext = SP - snake.distSincePoint;   // how far along this move the next point goes
+    while (travel > 0 && toNext <= travel) {
+      const f = toNext / travel;
+      snake.points.unshift({ x: px + (snake.head.x - px) * f, y: py + (snake.head.y - py) * f });
+      toNext += SP;
     }
-    const targetCount = Math.max(4, Math.round(snake.length / CFG.POINT_SPACING));
-    if (snake.points.length > targetCount) snake.points.length = targetCount;
+    snake.distSincePoint = SP - (toNext - travel); // distance from the newest point to the head
+    // head + (targetCount - 1) points: the same body the page draws
+    const keep = Math.max(3, Math.round(snake.length / SP) - 1);
+    if (snake.points.length > keep) snake.points.length = keep;
 
     if (wantsBoost) {
       snake.boostTimer -= dt;
@@ -298,7 +308,7 @@ class GameWorld {
         // The first couple of trail points sit essentially on top of the head.
         // Flag them so head-on encounters aren't mistaken for body hits — otherwise
         // two snakes meeting face-to-face each "hit the other's body" and BOTH die.
-        arr.push({ ownerId: s.id, x: p.x, y: p.y, r, isHead: i <= 2 });
+        arr.push({ ownerId: s.id, x: p.x, y: p.y, r, isHead: i <= 1 });
       }
     }
   }
@@ -325,8 +335,8 @@ class GameWorld {
 
   /**
    * Head-to-head resolution, classic snake-game style: when two heads meet, the SMALLER
-   * snake dies and the bigger one survives (and eats the drop). Only a near-exact
-   * tie kills both. Returns an array of [snake, killerName] pairs to kill.
+   * snake dies and the bigger one survives (and eats the drop); a near-tie is a coin flip.
+   * Never both. Returns an array of [snake, killerName, killerId] to kill.
    */
   _resolveHeadOnCollisions() {
     const alive = Array.from(this.snakes.values()).filter(s => s.alive);
@@ -341,36 +351,58 @@ class GameWorld {
         const minDist = ra * 0.72 + rb * 0.72;
         if (dist2(a.head.x, a.head.y, b.head.x, b.head.y) >= minDist * minDist) continue;
 
+        // Exactly one snake dies: the smaller one. When they are about the same size (within 5%) it is a coin flip,
+        // so a head-on never kills both and never favours the same player.
         const ratio = a.length / b.length;
-        if (ratio > 1.05) {
-          if (!doomed.has(b.id)) { doomed.add(b.id); deaths.push([b, a.name, a.id]); }
-        } else if (ratio < 0.95) {
-          if (!doomed.has(a.id)) { doomed.add(a.id); deaths.push([a, b.name, b.id]); }
-        } else {
-          // near-identical size: mutual destruction
-          if (!doomed.has(a.id)) { doomed.add(a.id); deaths.push([a, b.name, b.id]); }
-          if (!doomed.has(b.id)) { doomed.add(b.id); deaths.push([b, a.name, a.id]); }
-        }
+        const aWins = ratio > 1.05 ? true : ratio < 0.95 ? false : Math.random() < 0.5;
+        const [loser, winner] = aWins ? [b, a] : [a, b];
+        if (!doomed.has(loser.id)) { doomed.add(loser.id); deaths.push([loser, winner.name, winner.id]); }
       }
     }
     return deaths;
   }
 
+  _buildOrbGrid() {
+    this.orbGrid.clear();
+    const C = CFG.ORB_CELL;
+    for (const o of this.orbs) {
+      const key = Math.floor(o.x / C) + ',' + Math.floor(o.y / C);
+      const arr = this.orbGrid.get(key);
+      if (arr) arr.push(o); else this.orbGrid.set(key, [o]);
+    }
+  }
+
+  /** Eats the orbs touching the head. Only the squares around the head are looked at, and an eaten orb is marked and swept out at the end of the tick. */
   _checkOrbEating(snake) {
-    const r = radiusFor(snake) + 5;
-    for (let i = this.orbs.length - 1; i >= 0; i--) {
-      const o = this.orbs[i];
-      if (dist2(snake.head.x, snake.head.y, o.x, o.y) < r * r) {
-        snake.length += CFG.GROW_PER_ORB * o.value;
-        snake.coinsEaten++;
-        this.orbs.splice(i, 1);
+    const r = radiusFor(snake) + 5, C = CFG.ORB_CELL;
+    const cx = Math.floor(snake.head.x / C), cy = Math.floor(snake.head.y / C), reach = Math.ceil(r / C);
+    for (let gx = cx - reach; gx <= cx + reach; gx++) {
+      for (let gy = cy - reach; gy <= cy + reach; gy++) {
+        const arr = this.orbGrid.get(gx + ',' + gy);
+        if (!arr) continue;
+        for (const o of arr) {
+          if (o.eaten) continue;
+          if (dist2(snake.head.x, snake.head.y, o.x, o.y) < r * r) {
+            snake.length += CFG.GROW_PER_ORB * o.value;
+            snake.coinsEaten++;
+            o.eaten = true; this._anyEaten = true;
+          }
+        }
       }
     }
   }
 
+  /**
+   * Every orb goes through here. Past the safety limit the OLDEST orbs are merged into other orbs: their value moves
+   * on, so no orb (and no money) ever disappears. (The old limit of 700 deleted the oldest, which is why a dead
+   * snake's orbs vanished a few seconds later on a busy map.)
+   */
   _dropOrb(orb) {
     this.orbs.push(orb);
-    if (this.orbs.length > CFG.ORB_CAP) this.orbs.splice(0, this.orbs.length - CFG.ORB_CAP);
+    if (this.orbs.length > CFG.ORB_CAP) {
+      const merged = this.orbs.splice(0, this.orbs.length - CFG.ORB_CAP + 300);
+      for (const m of merged) this.orbs[(Math.random() * this.orbs.length) | 0].value += m.value;
+    }
   }
 
   _kill(snake, killerName, killerId) {
@@ -382,10 +414,7 @@ class GameWorld {
     for (let i = 0; i < snake.points.length; i += 3) dropAt.push(snake.points[i]);
     if (dropAt.length === 0) dropAt.push(snake.head);
     const perOrb = snake.length / CFG.GROW_PER_ORB / dropAt.length;
-    for (const p of dropAt) {
-      this.orbs.push(spawnOrb(p.x + rand(-8, 8), p.y + rand(-8, 8), perOrb));
-    }
-    if (this.orbs.length > CFG.ORB_CAP) this.orbs.splice(0, this.orbs.length - CFG.ORB_CAP);
+    for (const p of dropAt) this._dropOrb(spawnOrb(p.x + rand(-8, 8), p.y + rand(-8, 8), perOrb));
 
     // The killer (if a player) is told, so the page can play its kill sound.
     if (killerId !== undefined && killerId !== snake.id) {
@@ -427,6 +456,9 @@ class GameWorld {
       if (victim.alive) this._kill(victim, killerName, killerId);
     }
 
+    // Ranks by length, worked out once per tick (not once per snake).
+    const ranked = Array.from(this.snakes.values()).filter(x => x.alive).sort((a, b) => b.length - a.length);
+    const rankOf = new Map(); ranked.forEach((x, i) => rankOf.set(x.id, i + 1));
     for (const s of Array.from(this.snakes.values())) {
       if (!s.alive) continue;
       this._checkOrbEating(s);
@@ -437,11 +469,13 @@ class GameWorld {
         const killer = this.snakes.get(killerId);
         this._kill(s, killer ? killer.name : null, killer ? killer.id : undefined);
       } else {
-        const alive = Array.from(this.snakes.values()).filter(x => x.alive).sort((a, b) => b.length - a.length);
-        const rank = alive.indexOf(s) + 1;
+        const rank = rankOf.get(s.id) || 0;
         if (rank > 0 && rank < s.bestRank) s.bestRank = rank;
       }
     }
+
+    if (this._anyEaten) { this.orbs = this.orbs.filter(o => !o.eaten); this._anyEaten = false; }
+    this._buildOrbGrid();
 
     // Holds are settled last, so a snake that died this tick never gets paid.
     for (const s of Array.from(this.snakes.values())) {
@@ -455,7 +489,8 @@ class GameWorld {
   stop() { this._stopped = true; }
 
   /** Compact snapshot for network broadcast — no per-snake point trails (clients rebuild trails locally from head motion). */
-  snapshot() {
+  /** Every live snake's head and basics (the body is rebuilt by the page from the head's path). */
+  snapshotSnakes() {
     const snakes = [];
     for (const s of this.snakes.values()) {
       if (!s.alive) continue;
@@ -468,8 +503,27 @@ class GameWorld {
       if (this._isProtected(s)) entry.prot = 1; // only present while protected, to keep snapshots small
       snakes.push(entry);
     }
-    const orbs = this.orbs.map(o => ({ x: round1(o.x), y: round1(o.y), v: o.value }));
-    return { snakes, orbs, elapsed: round3(this.elapsed) };
+    return snakes;
+  }
+
+  /** The orbs within `radius` of a point, for one player's snapshot (the rest are too far to see). */
+  orbsNear(x, y, radius) {
+    const out = [], C = CFG.ORB_CELL, r2 = radius * radius;
+    const x0 = Math.floor((x - radius) / C), x1 = Math.floor((x + radius) / C), y0 = Math.floor((y - radius) / C), y1 = Math.floor((y + radius) / C);
+    for (let gx = x0; gx <= x1; gx++) {
+      for (let gy = y0; gy <= y1; gy++) {
+        const arr = this.orbGrid.get(gx + ',' + gy);
+        if (!arr) continue;
+        for (const o of arr) if (!o.eaten && dist2(x, y, o.x, o.y) <= r2) out.push({ x: round1(o.x), y: round1(o.y), v: round3(o.value) });
+      }
+    }
+    return out;
+  }
+
+  /** Everything (every snake and every orb): used by the tests and anything that wants the whole picture. */
+  snapshot() {
+    const orbs = this.orbs.map(o => ({ x: round1(o.x), y: round1(o.y), v: round3(o.value) }));
+    return { snakes: this.snapshotSnakes(), orbs, elapsed: round3(this.elapsed) };
   }
 }
 

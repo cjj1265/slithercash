@@ -752,22 +752,23 @@ function findSessionByPlayerId(playerId) {
   return null;
 }
 
+// Orbs farther than this from a player's head cannot be on their screen, so they are not sent. (Every snake's head is
+// always sent: the page builds each body from the head's path, so a snake must not drop out and come back.)
+const VIEW_RADIUS = 2700;
+
 function broadcastSnapshot(world) {
-  const snap = world.snapshot();
-  const base = JSON.stringify({ t: 'snapshot', snakes: snap.snakes, orbs: snap.orbs, elapsed: snap.elapsed });
+  const snakesJson = JSON.stringify(world.snapshotSnakes()); // once for everyone
+  const elapsed = Math.round(world.elapsed * 1000) / 1000;
   for (const session of sessions.values()) {
     if (!session.playerId || session.world !== world) continue; // un-joined sockets, and the other world's players, get nothing
-    // youId differs per client, so we can't reuse the exact same string for everyone.
-    session.conn.send(insertYouId(base, session.playerId));
+    const me = world.snakes.get(session.playerId);
+    if (me) session.view = { x: me.head.x, y: me.head.y }; // after a death the last view is kept
+    const v = session.view || { x: 0, y: 0 };
+    // youId and the nearby orbs differ per client, so each client gets its own string around the shared snakes.
+    session.conn.send('{"t":"snapshot","youId":' + JSON.stringify(session.playerId) + ',"snakes":' + snakesJson +
+      ',"orbs":' + JSON.stringify(world.orbsNear(v.x, v.y, VIEW_RADIUS)) + ',"elapsed":' + elapsed + '}');
   }
 }
-
-// Cheap way to personalize the youId field without re-serializing the whole
-// (potentially large) snapshot per connection.
-function insertYouId(baseJson, youId) {
-  return baseJson.replace('{"t":"snapshot",', `{"t":"snapshot","youId":${JSON.stringify(youId)},`);
-}
-
 let lastTick = Date.now();
 setInterval(() => {
   const now = Date.now();
