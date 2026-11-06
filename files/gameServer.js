@@ -124,6 +124,16 @@ class GameWorld {
     for (let i = 0; i < this.botCount; i++) this._spawnBot();
   }
 
+  /** Demo only: wipes the world back to a fresh start (every snake, player included, and every orb) with the given settings. */
+  resetAll(opts) {
+    this.snakes.clear(); this.orbs.length = 0; this.events.length = 0; this.grid.clear(); this.orbGrid.clear(); this._anyEaten = false;
+    this.radius = (opts && opts.radius) || CFG.WORLD_RADIUS; this.pendingRadius = 0;
+    this.botScale = (opts && opts.botScale) || 1;
+    this.ambientOrbs = (opts && opts.ambientOrbs) || 0;
+    this.botCount = opts && opts.bots !== undefined ? opts.bots : CFG.NUM_BOTS;
+    for (let i = 0; i < this.botCount; i++) this._spawnBot();
+  }
+
   /** A new arena size takes effect once nobody is playing in this world, so nobody is thrown out of the map. */
   setRadius(r) { this.pendingRadius = r; }
 

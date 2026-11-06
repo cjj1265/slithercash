@@ -46,6 +46,8 @@ async function ready(port) { for (let i = 0; i < 60; i++) { const r = await requ
   check('setBots replaces the bots with the new count', w._bots().length === 4 && w.botCount === 4);
   const victim = w._bots()[0]; w._kill(victim, 'test'); await sleep(4200);
   check('a dead bot is replaced only up to the set count', w._bots().length === 4, w._bots().length);
+  { const r = new GameWorld({ bots: 3, radius: 1500, ambientOrbs: 100, botScale: 2 }); r.addPlayer({ id: 'p', name: 'p', buyin: 5, skinIndex: 0 }); r.tick(1 / 30); r.resetAll({ bots: 5, radius: 1800, botScale: 3 });
+    check('resetAll clears the player and every orb, and starts the new bots', !r.snakes.has('p') && r.orbs.length === 0 && r._bots().length === 5 && r.radius === 1800 && r.botScale === 3); }
   w.setBots(0); await sleep(100);
   check('zero bots means none', w._bots().length === 0);
   const w2 = new GameWorld({ bots: 0, radius: 1500 });
@@ -70,6 +72,8 @@ async function ready(port) { for (let i = 0; i < 60; i++) { const r = await requ
   check('and /health follows', hb2 >= 3 && hb2 <= 7, hb2);
   const clampd = await request(8931, 'POST', '/api/demo', { bots: 9999, botScale: 99, radius: 5 });
   check('absurd values are clamped', clampd.json.bots === 80 && clampd.json.botScale === 6 && clampd.json.radius === 1200, clampd);
+  const rst = await request(8931, 'POST', '/api/demo', { reset: true });
+  check('reset puts the bots, size and arena back to the defaults', rst.status === 200 && rst.json.reset === true && rst.json.bots === 40 && rst.json.botScale === 3 && rst.json.radius === 1800, rst);
   // anyone can use any skin: join with the last (legendary) skin and no wallet
   const skin = await new Promise((resolve) => {
     const ws = new WebSocket('ws://127.0.0.1:8931'); let id = null; const t = setTimeout(() => resolve(null), 6000);

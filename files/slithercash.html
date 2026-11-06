@@ -556,6 +556,7 @@
     <select id="demoRadius"><option value="1500">Small</option><option value="1800">Medium</option><option value="3700">Full size</option></select>
     <label class="demo-check"><input type="checkbox" id="demoBadgeToggle" checked> Show the DEMO badge</label>
     <button type="button" id="demoApplyBtn">Apply bots</button>
+    <button type="button" id="demoResetBtn">Reset everything</button>
     <div id="demoMsg" class="demo-msg"></div>
   </div>
   <div class="social-links">
@@ -3101,6 +3102,15 @@ document.getElementById('demoApplyBtn').addEventListener('click', async ()=>{
     const r = await solApi('/api/demo', { method: 'POST', body: JSON.stringify({
       bots: Number(document.getElementById('demoBots').value), botScale: Number(document.getElementById('demoScale').value), radius: Number(document.getElementById('demoRadius').value) }) });
     demoSay(r.bots + ' bots ready. A new arena size starts at the next game.');
+  }catch(e){ demoSay(e.message); }
+});
+// Start over: the map and all bots go back to the defaults, and this browser's play-money balance, game history and demo settings are cleared.
+document.getElementById('demoResetBtn').addEventListener('click', async ()=>{
+  if(!confirm('Reset everything? This clears your demo balance and game history and puts the map and bots back to the defaults.')) return;
+  try{
+    await solApi('/api/demo', { method: 'POST', body: JSON.stringify({ reset: true }) });
+    try{ localStorage.removeItem('sc_wallet_v1'); localStorage.removeItem('sc_history_v1'); }catch(e){}
+    location.reload();
   }catch(e){ demoSay(e.message); }
 });
 /* ============================== LOADING SCREEN ============================== */
