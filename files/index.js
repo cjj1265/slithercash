@@ -208,6 +208,7 @@ async function handleApi(req, res) {
       if (!DEMO_MODE) { sendJson(res, 404, { error: 'Not found.' }); return; }
       if (route === 'POST /api/demo') {
         const body = await readJson(req, 1024);
+        if (body.reset === true) { practiceWorld.resetAll(DEMO_DEFAULTS); sendJson(res, 200, { bots: practiceWorld.botCount, botScale: practiceWorld.botScale, radius: practiceWorld.radius, reset: true }); return; }
         const count = clampNum(body.bots, 0, 80, practiceWorld.botCount);
         const scale = clampNum(body.botScale, 0.5, 6, practiceWorld.botScale);
         const radius = clampNum(body.radius, 1200, 3700, practiceWorld.pendingRadius || practiceWorld.radius);
