@@ -30,6 +30,7 @@
     --gold-deep:#a97c22;
     --ruby:#e6465c;
     --ruby-deep:#7a2230;
+    --fw:100vw; --fh:100vh; /* the width and height of the screen area (set by the demo's screen-shape option) */
   }
   *{box-sizing:border-box; margin:0; padding:0;}
   html,body{
@@ -218,7 +219,7 @@
   #skinSelectScreen .panel{ max-width:370px; }
   .skin-select-title{ font-family:var(--font); font-style:italic; font-weight:900; font-size:18px; letter-spacing:2px; text-transform:uppercase; color:var(--gold-bright); margin-bottom:16px; }
   #skinSelectPreview{
-    width:310px; max-width:78vw; height:132px; border-radius:16px;
+    width:310px; max-width:calc(var(--fw) * 0.78); height:132px; border-radius:16px;
     background:radial-gradient(ellipse at center, rgba(18,74,51,0.35), rgba(5,8,6,0.9));
     border:1px solid var(--hairline); box-shadow:inset 0 0 30px rgba(0,0,0,0.4);
   }
@@ -272,9 +273,9 @@
 
   /* the cash-out and death screens: one card that tilts toward the mouse, parts at different depths */
   #cashoutScreen, #deathScreen{ background:#050505; }
-  .result-wrap{ display:flex; flex-direction:column; align-items:center; width:min(640px, 94vw); max-height:100vh; overflow-y:auto; padding:14px 0; scrollbar-width:none; }
+  .result-wrap{ display:flex; flex-direction:column; align-items:center; width:min(640px, calc(var(--fw) * 0.94)); max-height:var(--fh); overflow-y:auto; padding:14px 0; scrollbar-width:none; }
   .result-wrap::-webkit-scrollbar{ display:none; }
-  .result-stage{ width:min(540px, 90vw); aspect-ratio:1100 / 640; perspective:900px; }
+  .result-stage{ width:min(540px, calc(var(--fw) * 0.9), calc((var(--fh) - 96px) * 1.72)); aspect-ratio:1100 / 640; perspective:900px; }
   .result-float{ width:100%; height:100%; transform-style:preserve-3d; animation:cardFloat 7s ease-in-out infinite; }
   .result-card{ position:relative; width:100%; height:100%; border-radius:32px; border:1px solid rgba(255,255,255,0.12);
     background:linear-gradient(160deg, #181818, #0a0a0a); box-shadow:0 34px 80px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.06);
@@ -330,7 +331,7 @@
   #loadingScreen.hidden{ opacity:0; pointer-events:none; }
   .loading-logo{ font-family:var(--font); font-style:italic; font-weight:900; font-size:32px; letter-spacing:3px; color:var(--gold-bright); text-shadow:0 0 18px rgba(240,194,74,0.4); text-transform:uppercase; }
   .loading-logo span{ color:var(--white-muted); }
-  .loading-bar-track{ margin-top:28px; width:250px; max-width:70vw; height:7px; border-radius:999px; background:rgba(255,255,255,0.06); overflow:hidden; box-shadow:inset 0 0 4px rgba(0,0,0,0.6); }
+  .loading-bar-track{ margin-top:28px; width:250px; max-width:calc(var(--fw) * 0.7); height:7px; border-radius:999px; background:rgba(255,255,255,0.06); overflow:hidden; box-shadow:inset 0 0 4px rgba(0,0,0,0.6); }
   .loading-bar-fill{ height:100%; width:0%; border-radius:999px; background:linear-gradient(90deg,#f0c24a,#ffe27a); box-shadow:0 0 14px 2px rgba(240,194,74,0.8), 0 0 28px 6px rgba(240,194,74,0.3); }
   .loading-tip{ margin-top:20px; font-size:12px; color:var(--dim); max-width:290px; text-align:center; letter-spacing:0.2px; line-height:1.6; min-height:32px; padding:0 12px; }
 
@@ -363,7 +364,7 @@
   #deathVeil{ position:absolute; inset:0; background:#000; opacity:0; pointer-events:none; z-index:15; }
 
   /* ---------- Solana wallet (devnet) ---------- */
-  #startScreen .panel{ max-height:calc(100vh - 24px); overflow-y:auto; scrollbar-width:none; }
+  #startScreen .panel{ max-height:calc(var(--fh) - 24px); overflow-y:auto; scrollbar-width:none; }
   #startScreen .panel::-webkit-scrollbar{ display:none; }
   .sol-hidden{ display:none !important; }
   .sol-connect-btn{
@@ -444,7 +445,7 @@
   .sol-status a{ color:var(--gold-bright); }
 
   #solToast{
-    position:fixed; left:50%; bottom:28px; z-index:60; max-width:90vw; padding:10px 18px; border-radius:999px;
+    position:fixed; left:50%; bottom:28px; z-index:60; max-width:calc(var(--fw) * 0.9); padding:10px 18px; border-radius:999px;
     background:rgba(18,24,26,0.96); border:1px solid rgba(240,194,74,0.45); color:var(--gold-bright);
     font-family:var(--font); font-variant-numeric:tabular-nums; font-size:12.5px; font-weight:700; box-shadow:0 10px 26px rgba(0,0,0,0.5);
     opacity:0; transform:translate(-50%, 12px); pointer-events:none; transition:opacity .25s ease, transform .25s ease;
@@ -492,6 +493,12 @@
   .demo-msg{ min-height:14px; font-size:11.5px; color:var(--dim); }
   .demo-badge{ position:fixed; top:14px; left:50%; transform:translateX(-50%); z-index:30; pointer-events:none; padding:6px 14px; border-radius:999px;
     font-style:italic; font-weight:800; font-size:12px; letter-spacing:1px; color:var(--gold-bright); background:rgba(10,14,12,0.7); border:1px solid rgba(240,194,74,0.4); }
+  /* Screen shape (demo only): the page is shrunk to a centred box of the chosen shape, with black around it */
+  html.frame{ background:#000; }
+  html.frame body{ position:fixed; transform:translateZ(0); overflow:hidden; box-shadow:0 0 0 1px rgba(255,255,255,0.1), 0 0 0 4000px #000; }
+  .demo-panel{ max-height:calc(var(--fh) - 100px); overflow-y:auto; scrollbar-width:thin; }
+  .demo-panel.collapsed{ display:none; }
+  html.frame .demo-badge{ top:auto; bottom:64px; } /* the top of a narrow frame is taken by the logo and the HUD */
   body.demo #solConnectBtn, body.demo #solNote, body.demo #solPanel, body.demo .online-pill{ display:none !important; }
 </style>
 </head>
@@ -554,9 +561,12 @@
     <select id="demoScale"><option value="1">Normal</option><option value="3">Big</option><option value="5">Huge</option></select>
     <label>Arena</label>
     <select id="demoRadius"><option value="1500">Small</option><option value="1800">Medium</option><option value="3700">Full size</option></select>
+    <label>Screen shape</label>
+    <select id="demoFrame"><option value="window">Fit the window</option><option value="vertical">Vertical (TikTok 9:16)</option><option value="square">Square (1:1)</option><option value="wide">Widescreen (YouTube 16:9)</option></select>
     <label class="demo-check"><input type="checkbox" id="demoBadgeToggle" checked> Show the DEMO badge</label>
     <button type="button" id="demoApplyBtn">Apply bots</button>
     <button type="button" id="demoResetBtn">Reset everything</button>
+    <button type="button" id="demoHideBtn">Hide this panel (press H)</button>
     <div id="demoMsg" class="demo-msg"></div>
   </div>
   <div class="social-links">
@@ -983,11 +993,13 @@ const cashOutLabel = document.getElementById('cashOutLabel');
 const cashOutAmount = document.getElementById('cashOutAmount');
 const cashoutMenuBtn = document.getElementById('cashoutMenuBtn');
 
+/* Where the page is drawn. Normally the whole window; in demo mode it can be a vertical, square or widescreen box (see applyFrame). */
+const frameBox = { x:0, y:0, w:window.innerWidth, h:window.innerHeight };
 function resize(){
-  canvas.width = window.innerWidth; canvas.height = window.innerHeight;
-  menuBgCanvas.width = window.innerWidth; menuBgCanvas.height = window.innerHeight;
+  canvas.width = frameBox.w; canvas.height = frameBox.h;
+  menuBgCanvas.width = frameBox.w; menuBgCanvas.height = frameBox.h;
 }
-window.addEventListener('resize', resize);
+window.addEventListener('resize', ()=> applyFrame());
 resize();
 
 /* ============================== WALLET / EARNINGS ============================== */
@@ -1035,7 +1047,7 @@ let player = null;
 let running = false;
 let lastTime = 0;
 
-let mouseScreen = {x: window.innerWidth/2, y: window.innerHeight/2 - 40};
+let mouseScreen = {x: frameBox.w/2, y: frameBox.h/2 - 40};
 let boosting = false;
 let spaceDown = false;
 
@@ -1096,18 +1108,18 @@ function initWorld(playerName, buyin, skinIndex){
 }
 
 /* ============================== INPUT ============================== */
-canvas.addEventListener('mousemove', (e)=>{ mouseScreen.x = e.clientX; mouseScreen.y = e.clientY; });
+canvas.addEventListener('mousemove', (e)=>{ mouseScreen.x = e.clientX - frameBox.x; mouseScreen.y = e.clientY - frameBox.y; });
 canvas.addEventListener('mousedown', ()=>{ boosting = true; });
 window.addEventListener('mouseup', ()=>{ boosting = false; });
 window.addEventListener('keydown', (e)=>{ if(e.code === 'Space'){ spaceDown = true; e.preventDefault(); } });
 window.addEventListener('keyup', (e)=>{ if(e.code === 'Space'){ spaceDown = false; } });
 
 canvas.addEventListener('touchmove', (e)=>{
-  if(e.touches.length){ mouseScreen.x = e.touches[0].clientX; mouseScreen.y = e.touches[0].clientY; }
+  if(e.touches.length){ mouseScreen.x = e.touches[0].clientX - frameBox.x; mouseScreen.y = e.touches[0].clientY - frameBox.y; }
   e.preventDefault();
 }, {passive:false});
 canvas.addEventListener('touchstart', (e)=>{
-  if(e.touches.length){ mouseScreen.x = e.touches[0].clientX; mouseScreen.y = e.touches[0].clientY; }
+  if(e.touches.length){ mouseScreen.x = e.touches[0].clientX - frameBox.x; mouseScreen.y = e.touches[0].clientY - frameBox.y; }
 }, {passive:false});
 
 function bindBoostBtn(el){
@@ -3081,10 +3093,38 @@ function demoAdd(n){
   n = Math.floor(n); if(!(n > 0)){ demoSay('Enter an amount above 0.'); return; }
   wallet = Math.min(1e12, wallet + n); saveWallet(); renderWalletUI(); demoSay('Added ' + fmtCash(n) + '.');
 }
+/* Screen shape. The whole page is drawn inside a centred box of the chosen shape (black around it), so a recording of that
+   box is already the right size for TikTok (9:16), a square post or YouTube (16:9), and the menu, game and cash-out card all fit it. */
+const FRAME_SHAPES = { window: null, vertical: [9, 16], square: [1, 1], wide: [16, 9] };
+let frameShape = 'window';
+function applyFrame(){
+  const root = document.documentElement, shape = SOL.demo ? FRAME_SHAPES[frameShape] : null;
+  let x = 0, y = 0, w = window.innerWidth, h = window.innerHeight;
+  if(shape){
+    h = window.innerHeight; w = Math.round(h * shape[0] / shape[1]);
+    if(w > window.innerWidth){ w = window.innerWidth; h = Math.round(w * shape[1] / shape[0]); }
+    w -= w % 2; h -= h % 2;
+    x = Math.round((window.innerWidth - w) / 2); y = Math.round((window.innerHeight - h) / 2);
+  }
+  frameBox.x = x; frameBox.y = y; frameBox.w = w; frameBox.h = h;
+  root.classList.toggle('frame', !!shape);
+  const b = document.body.style;
+  if(shape){ b.left = x + 'px'; b.top = y + 'px'; b.width = w + 'px'; b.height = h + 'px'; root.style.setProperty('--fw', w + 'px'); root.style.setProperty('--fh', h + 'px'); }
+  else { b.left = b.top = b.width = b.height = ''; root.style.removeProperty('--fw'); root.style.removeProperty('--fh'); }
+  resize();
+}
+function setFrameShape(v){
+  frameShape = FRAME_SHAPES[v] !== undefined ? v : 'window';
+  try{ localStorage.setItem('sp_demo_frame', frameShape); }catch(e){}
+  const sel = document.getElementById('demoFrame'); if(sel) sel.value = frameShape;
+  applyFrame();
+}
 function setupDemo(){
   if(SOL.demo) return;
   SOL.demo = true;
   document.body.classList.add('demo');
+  try{ const f = localStorage.getItem('sp_demo_frame'); if(f && FRAME_SHAPES[f] !== undefined) frameShape = f; }catch(e){}
+  setFrameShape(frameShape);
   demoPanel.hidden = false; demoBadge.hidden = !demoBadgeToggle.checked;
   const sub = document.getElementById('walletSub'); if(sub) sub.textContent = 'Demo balance (play money)';
   fetch('/api/demo').then(r => r.json()).then(d => {
@@ -3094,6 +3134,13 @@ function setupDemo(){
   }).catch(()=>{});
   refreshSkinAction();
 }
+document.getElementById('demoFrame').addEventListener('change', (e)=> setFrameShape(e.target.value));
+document.getElementById('demoHideBtn').addEventListener('click', ()=> demoPanel.classList.add('collapsed'));
+window.addEventListener('keydown', (e)=>{
+  if(!SOL.demo || e.code !== 'KeyH' || e.ctrlKey || e.metaKey || e.altKey) return;
+  const a = document.activeElement; if(a && (a.tagName === 'INPUT' || a.tagName === 'SELECT' || a.tagName === 'TEXTAREA')) return;
+  demoPanel.classList.toggle('collapsed'); // H hides or shows the panel, so the menu can be filmed clean
+});
 document.getElementById('demoAddBtn').addEventListener('click', ()=> demoAdd(parseFloat(document.getElementById('demoFunds').value)));
 document.querySelectorAll('#demoPanel [data-add]').forEach(b => b.addEventListener('click', ()=> demoAdd(Number(b.dataset.add))));
 demoBadgeToggle.addEventListener('change', ()=>{ demoBadge.hidden = !demoBadgeToggle.checked; });
