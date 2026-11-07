@@ -121,5 +121,37 @@ console.log('\n== orbs are found by square ==');
   check('an orb at the head is eaten, one far away is not', s.length > before && w.orbs.some((o) => o.x === 300));
 }
 
+console.log('\n== new snakes start away from everyone ==');
+{
+  const w = new GameWorld({ bots: 30, radius: 3700, botScale: 1 });
+  for (let i = 0; i < 90; i++) w.tick(DT);
+  let closest = 1e9;
+  for (let k = 0; k < 25; k++) {
+    const s = w.addPlayer({ id: 'n' + k, name: 'n' + k, buyin: 5, skinIndex: 0 });
+    for (const o of w.snakes.values()) { if (o === s) continue; closest = Math.min(closest, dist(s.head, o.head)); for (let i = 0; i < o.points.length; i += 3) closest = Math.min(closest, dist(s.head, o.points[i])); }
+    w.tick(DT);
+  }
+  check('25 new players each started at least 500 units from every other snake (30 bots on a full map)', closest >= 500, Math.round(closest));
+}
+
+console.log('\n== the cash-out ring and the short update rows ==');
+{
+  const w = newWorld();
+  const a = spawn(w, 'a', 20, 0, 0, 0); a.bornAt = w.elapsed - 30;
+  spawn(w, 'b', 5, 500, 500, 0);
+  for (let i = 0; i < 30; i++) { w.startCashout('a'); w.tick(DT); }          // holds for one second of the 5 it takes
+  const row = w.snapshotRows().find((r) => r[0] === 'a');
+  check('a snake that is holding to cash out reports how far along it is (about 20% after 1 of 5 seconds)', row && row.length === 7 && row[6] >= 15 && row[6] <= 25, row);
+  check('a snake that is not holding has no ring value', w.snapshotRows().find((r) => r[0] === 'b').length === 6);
+  w.cancelCashout('a');
+  check('letting go removes it', w.snapshotRows().find((r) => r[0] === 'a').length === 6);
+  const full = JSON.stringify(w.snapshotSnakes()).length, short = JSON.stringify(w.snapshotRows()).length;
+  check('the short rows are less than half the size of the old objects', short < full * 0.5, [short, full]);
+  const flat = w.orbsNearFlat(0, 0, 4000);
+  w._dropOrb({ x: 10, y: 20, value: 0.5 }); w._buildOrbGrid();
+  const f2 = w.orbsNearFlat(0, 0, 100);
+  check('orbs go out as a flat [x, y, value] list', f2.length % 3 === 0 && f2.includes(10) && f2.includes(20) && f2.includes(0.5) && Array.isArray(flat), f2);
+}
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

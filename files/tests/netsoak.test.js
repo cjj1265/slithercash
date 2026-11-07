@@ -37,7 +37,7 @@ function makeBot(i) {
           stats.snapshots++; bot.snaps++;
           if (bot.lastSnap && bot.alive) { const gap = now - bot.lastSnap; if (gap > stats.maxGapMs) stats.maxGapMs = gap; if (gap > 500) bot.gaps++; }
           bot.lastSnap = now;
-          if (!Array.isArray(m.snakes) || !Array.isArray(m.orbs)) fail('a snapshot is missing snakes or orbs');
+          if (!Array.isArray(m.s) || m.s.some((r) => !Array.isArray(r) || r.length < 6)) fail('a snapshot has no snakes or a malformed row'); if (m.o !== undefined && (!Array.isArray(m.o) || m.o.length % 3 !== 0)) fail('a snapshot has a malformed orb list');
           break;
         }
         case 'death': stats.deaths++; bot.alive = false; setTimeout(() => ws.readyState === 1 && ws.close(), 50); break;

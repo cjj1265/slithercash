@@ -126,12 +126,18 @@ const depositAndWait = async (kp, pid, addr, solAmount, expectTotal) => {
 function wsOpen(walletId, buyin, name, skinIndex) {
   return new Promise((resolve) => {
     const ws = new WebSocket('ws://localhost:' + PORT);
-    const state = { ws, msgs: [], snaps: [], id: null };
+    const state = { ws, msgs: [], snaps: [], id: null, info: {} };
     const timer = setTimeout(() => resolve(state), 6000);
     ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name: name || 'e2e', buyin, skinIndex: skinIndex || 0, walletId }));
     ws.onmessage = (ev) => {
       const m = JSON.parse(ev.data);
-      if (m.t === 'snapshot') { state.snaps.push(m); return; }
+      if (m.t === 'body') { state.info[m.id] = m; return; } // name, skin and body, sent once per snake
+      if (m.t === 'snapshot') { // the server sends short rows; the checks below read them as the older object form
+        m.snakes = (m.s || []).map((r) => ({ id: r[0], x: r[1], y: r[2], angle: r[3], length: r[4], boosting: !!(r[5] & 1), prot: (r[5] & 2) ? 1 : 0, co: r[6] || 0, name: (state.info[r[0]] || {}).name, skinIndex: (state.info[r[0]] || {}).skinIndex }));
+        if (Array.isArray(m.o)) { state.orbs = []; for (let i = 0; i + 2 < m.o.length; i += 3) state.orbs.push({ x: m.o[i], y: m.o[i + 1], v: m.o[i + 2] }); } // orbs come less often than snakes: keep the last list
+        m.orbs = state.orbs || [];
+        state.snaps.push(m); return;
+      }
       state.msgs.push(m);
       if (m.t === 'welcome') { state.id = m.id; clearTimeout(timer); resolve(state); }
       if (m.t === 'error') { clearTimeout(timer); resolve(state); }
@@ -744,6 +750,39 @@ const errOf = (state) => (state.msgs.find((m) => m.t === 'error') || {}).message
   check('(admin still locked on this instance without a token)', am.status === 404 || am.status === 401);
   await stopServer();
 
+  console.log('\n== several maps: the first fills, the next opens, and a full house is refused before any money moves ==');
+  const mapsData = path.join(SP, 'e2e-wallet-data-maps.json');
+  for (const f of [mapsData, mapsData + '.ledger.jsonl', mapsData + '.tmp']) fs.rmSync(f, { force: true });
+  await startServer(game, mapsData, { ADMIN_TOKEN: ADMIN, MAX_PLAYERS_PER_MAP: '2', MAX_MAPS: '2' });
+  const Mk = Keypair.generate(); fake.airdrop(Mk.publicKey.toBase58(), 1 * LAMPORTS_PER_SOL);
+  const LMk = await login(Mk); const pidM = LMk.res.json.playerId;
+  const addrM = (await http_('GET', '/api/player-deposit-address', null, { 'X-Player-Id': pidM })).json.address;
+  check('funded the maps test wallet with 0.08 SOL', !!(await depositAndWait(Mk, pidM, addrM, 0.08, 0.08)));
+  const mapOf = (st) => ((st.msgs.find((m) => m.t === 'welcome') || {}).cfg || {}).MAP;
+  const m1 = await wsOpen(pidM, 1), m2 = await wsOpen(pidM, 1), m3 = await wsOpen(pidM, 1), m4 = await wsOpen(pidM, 1);
+  check('the first two players are on map 1', mapOf(m1) === 1 && mapOf(m2) === 1, [mapOf(m1), mapOf(m2)]);
+  check('the next two open map 2', mapOf(m3) === 2 && mapOf(m4) === 2, [mapOf(m3), mapOf(m4)]);
+  const m5 = await wsOpen(pidM, 1);
+  check('with every map full the join is refused with a clear message', !m5.id && /map is full|maps are full|every game map is full/i.test(errOf(m5) || ''), m5.msgs);
+  check('and no money was taken for the refused join (0.04 SOL left after four buy-ins)', near((await balanceOf(pidM)).sol, 0.04), await balanceOf(pidM));
+  await sleep(900);
+  const snapIds = (st) => { const sn = st.snaps[st.snaps.length - 1]; return sn ? sn.snakes.map((x) => x.id).sort() : []; };
+  check('players on map 1 only see each other', JSON.stringify(snapIds(m1)) === JSON.stringify([m1.id, m2.id].sort()), snapIds(m1));
+  check('players on map 2 only see each other', JSON.stringify(snapIds(m3)) === JSON.stringify([m3.id, m4.id].sort()), snapIds(m3));
+  const stM = (await admin('GET', '/admin/api/status')).json;
+  check('the admin page counts both maps and the money in play is covered', JSON.stringify(stM.world.maps) === '[2,2]' && stM.solvency.ok && near(stM.solvency.inPlaySol, 0.04, 0.001), [stM.world, stM.solvency]);
+  const coM = await wsCashout(m3);
+  check('a player on map 2 cashes out for exactly their buy-in', coM && near(coM.amount, 1, 1e-6), coM);
+  check('and the money is back on the balance (0.05 SOL)', near((await balanceOf(pidM)).sol, 0.05), await balanceOf(pidM));
+  const coM1 = await wsCashout(m1);
+  check('a player on map 1 cashes out too', coM1 && near(coM1.amount, 1, 1e-6), coM1);
+  const m6 = await wsOpen(pidM, 1);
+  check('a new player fills the first map again, not the later one', mapOf(m6) === 1, mapOf(m6));
+  for (const st of [m1, m2, m3, m4, m5, m6]) { try { st.ws.close(); } catch (e) {} }
+  await sleep(500);
+  const stM2 = (await admin('GET', '/admin/api/status')).json;
+  check('still solvent after everyone left', stM2.solvency.ok, stM2.solvency);
+  await stopServer();
   hook.close();
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   process.exitCode = fail ? 1 : 0;

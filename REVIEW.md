@@ -150,6 +150,8 @@ npm run test:wallet    # end-to-end: 128 checks, a few minutes
 | `WS_ALLOWED_ORIGINS` | none | Extra origins allowed to open game connections (the site's own host is always allowed). |
 | `WS_MAX_CONNECTIONS` | `500` | Total WebSocket connections. |
 | `WS_MAX_PER_IP` | `10` | WebSocket connections per IP address. |
+| `MAX_PLAYERS_PER_MAP` | `100` | Real-money players per map. The first map fills before a second opens. |
+| `MAX_MAPS` | `3` | How many real-money maps may open. When all are full, a join is refused before any money is taken. |
 | `WS_MAX_MESSAGES_PER_SEC` | `60` | Messages per connection per second. |
 | `WS_JOIN_TIMEOUT_MS` | `10000` | A new connection must join a game within this long. |
 | `WS_IDLE_LOBBY_MS` | `30000` | A connection outside a game is dropped after this long. |

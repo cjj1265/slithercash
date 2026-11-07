@@ -63,7 +63,7 @@ const CLIENT_HTML_PATH = path.join(__dirname, 'slithercash.html');
 // Two separate worlds, and players in one never meet players in the other. Practice play is free and
 // its snakes (and any bots) hold value nobody paid for; if they shared a map with real-money players,
 // a free snake could die next to a paying one and hand it orbs to cash out. Every unit of value in
-// realWorld was put there by a buy-in taken from a real balance, which is what the solvency check relies on.
+// every real-money world's value was put there by a buy-in taken from a real balance, which is what the solvency check relies on.
 // DEMO_MODE is for showing the game off on your own computer (`npm run demo`): a play-money world with lots of big
 // bots, free food, and controls to change them. It never runs with a wallet, never on a host, and only answers
 // to this computer.
@@ -73,9 +73,31 @@ if (DEMO_MODE && (process.env.GAME_WALLET_SECRET || process.env.RENDER || proces
   process.exit(1);
 }
 const DEMO_DEFAULTS = { bots: 40, botScale: 3, radius: 1800, ambientOrbs: 450 };
-const realWorld = new GameWorld({ bots: 0 });
+// Real-money play is split over several full-size maps, each holding up to MAX_PLAYERS_PER_MAP players. The first map is
+// filled before a second opens, and so on up to MAX_MAPS; when every map is full a player is asked to try again shortly.
+// The wallet (balances, deposits, cash-outs) is shared by all maps; only the game worlds are separate.
+const MAX_PLAYERS_PER_MAP = Math.max(1, Math.floor(Number(process.env.MAX_PLAYERS_PER_MAP) || 100));
+const MAX_MAPS = Math.max(1, Math.floor(Number(process.env.MAX_MAPS) || 3));
+const realWorlds = [new GameWorld({ bots: 0 })];
 const practiceWorld = DEMO_MODE ? new GameWorld(DEMO_DEFAULTS) : new GameWorld();
-const worlds = [realWorld, practiceWorld];
+const worlds = [realWorlds[0], practiceWorld];
+/** The first real map with room, or null when every map is full. */
+function realWorldWithRoom() { for (const w of realWorlds) if (w.playerCount() < MAX_PLAYERS_PER_MAP) return w; return null; }
+/** A real map for a new player: one with room, else a new map if the limit allows, else null. */
+function acquireRealWorld() {
+  const w = realWorldWithRoom();
+  if (w) return w;
+  if (realWorlds.length >= MAX_MAPS) return null;
+  const nw = new GameWorld({ bots: 0 });
+  realWorlds.push(nw); worlds.push(nw);
+  console.log('[game] map ' + realWorlds.length + ' opened (the others are full)');
+  return nw;
+}
+/** Which real map a snake is on (null if none). */
+function realWorldOf(snakeId) { for (const w of realWorlds) if (w.snakes.has(snakeId)) return w; return null; }
+/** Everything in play across every real map, in credits: what the solvency check compares against the money held. */
+function realValueInPlay() { let t = 0; for (const w of realWorlds) t += w.totalValue(); return t; }
+function realPlayerCount() { let n = 0; for (const w of realWorlds) n += w.snakes.size; return n; }
 
 /** connId -> { conn: WSConnection, playerId: string|null, world: GameWorld|null } */
 const sessions = new Map();
@@ -351,26 +373,30 @@ function applyCashoutHold() {
 /** Everyone in a real-money game right now, for the admin page. Snake ids are already public (every snapshot carries them). */
 function livePlayers() {
   const out = [];
-  for (const s of realWorld.snakes.values()) {
-    if (!s.isPlayer || !s.alive) continue;
-    const link = walletByPlayer.get(s.id);
-    out.push({
-      snakeId: s.id, name: s.name, owner: link ? wallet.ownerOf(link.walletId) : null,
-      stakeSol: link ? link.buyin / wallet.CREDITS_PER_SOL : 0,
-      valueSol: (s.length / CFG.LEN_PER_DOLLAR) / wallet.CREDITS_PER_SOL,
-      aliveSec: Math.round(realWorld.elapsed - s.bornAt),
-      holdingCashout: s.cashoutHold !== undefined && s.cashoutHold !== null,
-    });
-  }
+  realWorlds.forEach((world, mapIndex) => {
+    for (const s of world.snakes.values()) {
+      if (!s.isPlayer || !s.alive) continue;
+      const link = walletByPlayer.get(s.id);
+      out.push({
+        snakeId: s.id, name: s.name, owner: link ? wallet.ownerOf(link.walletId) : null,
+        stakeSol: link ? link.buyin / wallet.CREDITS_PER_SOL : 0,
+        valueSol: (s.length / CFG.LEN_PER_DOLLAR) / wallet.CREDITS_PER_SOL,
+        aliveSec: Math.round(world.elapsed - s.bornAt),
+        holdingCashout: s.cashoutHold !== undefined && s.cashoutHold !== null,
+        map: mapIndex + 1,
+      });
+    }
+  });
   return out.sort((a, b) => b.valueSol - a.valueSol);
 }
 
 /** Take a player out of the game. Paying out credits what the snake is worth now; forfeiting drops it on the map like a death. */
 function kickSnake(snakeId, forfeit) {
-  const s = realWorld.snakes.get(snakeId);
+  const world = realWorldOf(snakeId);
+  const s = world && world.snakes.get(snakeId);
   if (!s || !s.isPlayer || !s.alive) return false;
-  if (forfeit) realWorld._kill(s, 'the house');
-  else realWorld.requestCashout(snakeId);
+  if (forfeit) world._kill(s, 'the house');
+  else world.requestCashout(snakeId);
   return true;
 }
 
@@ -411,7 +437,8 @@ async function handleAdmin(req, res) {
     const route = req.method + ' ' + url.pathname;
     if (route === 'GET /admin/api/status') {
       const status = await wallet.getAdminStatus();
-      status.world = { realPlayers: realWorld.snakes.size, inPlayCredits: realWorld.totalValue(), inPlaySol: realWorld.totalValue() / wallet.CREDITS_PER_SOL, practicePlayers: practiceWorld.snakes.size };
+      const inPlay = realValueInPlay();
+      status.world = { realPlayers: realPlayerCount(), maps: realWorlds.map((w) => w.playerCount()), inPlayCredits: inPlay, inPlaySol: inPlay / wallet.CREDITS_PER_SOL, practicePlayers: practiceWorld.snakes.size };
       status.live = livePlayers();
       sendJson(res, 200, status);
     } else if (route === 'POST /admin/api/pause') {
@@ -625,6 +652,11 @@ function handleMessage(connId, msg) {
         return;
       }
       if (typeof msg.walletId === 'string') {
+        // Every real map full: say so before any money is taken.
+        if (!realWorldWithRoom() && realWorlds.length >= MAX_MAPS) {
+          session.conn.send({ t: 'error', message: 'Every game map is full right now. Try again in a minute.' });
+          return;
+        }
         walletId = msg.walletId;
         if (wallet.isBanned(walletId)) {
           session.conn.send({ t: 'error', message: 'This wallet is not allowed to play. You can still withdraw your balance.' });
@@ -643,7 +675,7 @@ function handleMessage(connId, msg) {
         }
         walletByPlayer.set(playerId, { walletId, buyin });
         wallet.logLedger('buyin', { walletId, snake: playerId, credits: buyin });
-        world = realWorld;
+        world = acquireRealWorld() || realWorlds[0]; // a map with room was confirmed above
       }
 
       world.addPlayer({ id: playerId, name, buyin, skinIndex });
@@ -654,7 +686,7 @@ function handleMessage(connId, msg) {
         t: 'welcome',
         id: playerId,
         cfg: {
-          WORLD_RADIUS: world.radius, LEN_PER_DOLLAR: CFG.LEN_PER_DOLLAR, TICK_RATE: CFG.TICK_RATE,
+          MAP: realWorlds.indexOf(world) + 1, WORLD_RADIUS: world.radius, LEN_PER_DOLLAR: CFG.LEN_PER_DOLLAR, TICK_RATE: CFG.TICK_RATE,
           CASHOUT_HOLD_SEC: CFG.CASHOUT_HOLD_SEC, MIN_PLAY_SEC: CFG.MIN_PLAY_SEC, SPAWN_PROTECT_SEC: CFG.SPAWN_PROTECT_SEC,
         },
       });
@@ -734,6 +766,8 @@ function drainEvents(world) {
     const session = findSessionByPlayerId(evt.targetId);
     if (!session) continue;
     if (evt.type === 'death') {
+      // how long ago (in seconds) the last update was sent: the page uses it to put everyone where they were at the moment of the hit
+      evt.data.ahead = (world.tickCount - world.lastSnapTick) / CFG.TICK_RATE;
       session.conn.send({ t: 'death', ...evt.data });
       session.playerId = null;
       session.idleSince = Date.now();
@@ -758,27 +792,32 @@ function findSessionByPlayerId(playerId) {
 const VIEW_RADIUS = 2700;
 
 function broadcastSnapshot(world) {
-  const snakesList = world.snapshotSnakes();
-  const snakesJson = JSON.stringify(snakesList); // once for everyone
+  const rows = world.snapshotRows();               // every snake, as short rows (see snapshotRows)
+  const rowsJson = JSON.stringify(rows);            // once for everyone
   const elapsed = Math.round(world.elapsed * 1000) / 1000;
+  const orbsDue = world.tickCount % 4 === 0;        // the nearby orbs go out about 7 times a second, not 15
   for (const session of sessions.values()) {
     if (!session.playerId || session.world !== world) continue; // un-joined sockets, and the other world's players, get nothing
     const me = world.snakes.get(session.playerId);
     if (me) session.view = { x: me.head.x, y: me.head.y }; // after a death the last view is kept
     const v = session.view || { x: 0, y: 0 };
     // The page builds each body from the path its head takes, so a snake it has not watched yet would show only a stub
-    // (the rest invisible, yet deadly). Each snake's real body is sent once, the first time this player is sent that snake.
+    // (the rest invisible, yet deadly). Each snake's real body, and what never changes about it (name, skin), is sent once,
+    // the first time this player is sent that snake.
     if (!session.knownSnakes) session.knownSnakes = new Set();
-    for (const sn of snakesList) {
-      if (session.knownSnakes.has(sn.id)) continue;
-      session.knownSnakes.add(sn.id);
-      session.conn.send({ t: 'body', id: sn.id, pts: world.bodyOf(sn.id) });
+    for (const row of rows) {
+      const id = row[0];
+      if (session.knownSnakes.has(id)) continue;
+      session.knownSnakes.add(id);
+      session.conn.send({ t: 'body', id, ...world.staticOf(id), pts: world.bodyOf(id) });
     }
-    if (session.knownSnakes.size > snakesList.length) { const live = new Set(snakesList.map((x) => x.id)); for (const id of session.knownSnakes) if (!live.has(id)) session.knownSnakes.delete(id); }
+    if (session.knownSnakes.size > rows.length) { const live = new Set(rows.map((r) => r[0])); for (const id of session.knownSnakes) if (!live.has(id)) session.knownSnakes.delete(id); }
     // youId and the nearby orbs differ per client, so each client gets its own string around the shared snakes.
-    session.conn.send('{"t":"snapshot","youId":' + JSON.stringify(session.playerId) + ',"snakes":' + snakesJson +
-      ',"orbs":' + JSON.stringify(world.orbsNear(v.x, v.y, VIEW_RADIUS)) + ',"elapsed":' + elapsed + '}');
+    let out = '{"t":"snapshot","youId":' + JSON.stringify(session.playerId) + ',"s":' + rowsJson;
+    if (orbsDue || !session.orbsSent) { out += ',"o":' + JSON.stringify(world.orbsNearFlat(v.x, v.y, VIEW_RADIUS)); session.orbsSent = true; }
+    session.conn.send(out + ',"elapsed":' + elapsed + '}');
   }
+  world.lastSnapTick = world.tickCount;
 }
 let lastTick = Date.now();
 setInterval(() => {
@@ -788,10 +827,9 @@ setInterval(() => {
   for (const world of worlds) {
     world.tick(dt);
     drainEvents(world);
-    broadcastSnapshot(world);
+    if (world.tickCount % 2 === 0) broadcastSnapshot(world); // the game runs 30 times a second; players get an update 15 times a second
   }
 }, TICK_MS);
-
 httpServer.listen(...(DEMO_MODE ? [PORT, '127.0.0.1'] : [PORT]), () => {
   console.log(`SnakePay multiplayer server listening on :${PORT}`);
   console.log(`Healthcheck: http://localhost:${PORT}/health`);
@@ -800,7 +838,7 @@ httpServer.listen(...(DEMO_MODE ? [PORT, '127.0.0.1'] : [PORT]), () => {
     console.warn('[security] TRUST_CLOUDFLARE is on but ORIGIN_SECRET is not set: anyone who reaches this server directly can forge their address and dodge the per-address limits. Set ORIGIN_SECRET.');
   }
   if (ORIGIN_SECRET) console.log('[security] ORIGIN_SECRET set: only requests carrying it (and /health) are served');
-  wallet.setInPlayProvider(() => realWorld.totalValue());
+  wallet.setInPlayProvider(() => realValueInPlay());
   wallet.init();
   applyCashoutHold();
   if (practiceWorld.botCount > 0) {
