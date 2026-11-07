@@ -1575,8 +1575,32 @@ function drawSkinExtras(c, pts, r, skin){
   }
 }
 
+/* Holding to cash out fills a ring around the snake's head. Everyone sees it (the server sends how far along each snake is), so
+   other players know you are about to leave with your money. */
+function drawCashoutRing(snake){
+  if(!(snake.co > 0)) return;
+  const h = worldToScreen(snake.head.x, snake.head.y);
+  const r = radiusFor(snake) * camera.zoom;
+  const ringR = r * 1.75 + 7, lw = Math.max(3, r * 0.3);
+  const p = clamp(snake.co / 100, 0, 1), pulse = 0.5 + 0.5 * Math.sin(performance.now() / 160);
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.arc(h.x, h.y, ringR, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = lw; ctx.stroke(); // the empty track
+  ctx.beginPath(); ctx.arc(h.x, h.y, ringR, -Math.PI / 2, -Math.PI / 2 + p * Math.PI * 2);
+  ctx.shadowColor = 'rgba(255,201,40,' + (0.55 + 0.35 * pulse) + ')'; ctx.shadowBlur = 10 + 8 * pulse;
+  ctx.strokeStyle = '#ffc928'; ctx.lineWidth = lw; ctx.stroke();                // the part that has filled up
+  ctx.restore();
+  if(r > 5){
+    ctx.save(); ctx.font = "800 " + Math.max(10, Math.min(15, r * 0.5)) + "px 'Exo 2', sans-serif"; ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(255,226,122,0.95)'; ctx.shadowColor = 'rgba(0,0,0,0.7)'; ctx.shadowBlur = 3;
+    ctx.fillText('CASHING OUT', h.x, h.y + ringR + lw + 12); ctx.restore();
+  }
+}
+
 function drawSnake(snake){
   drawSnakeBody(snake);
+  drawCashoutRing(snake);
   if(snake.prot){
     // a pulsing ring around the head while the snake cannot be hurt
     const h = worldToScreen(snake.head.x, snake.head.y);
@@ -1701,7 +1725,7 @@ function drawSnakeBody(snake){
     ctx.fillStyle = 'rgba(234,238,233,0.88)';
     ctx.textAlign = 'center';
     ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 3;
-    ctx.fillText(snake.name, hp.x, hp.y - r - 10);
+    ctx.fillText(snake.name, hp.x, hp.y - r - 10 - (snake.co > 0 ? r * 0.75 + 12 : 0)); // above the cash-out ring when there is one
     ctx.shadowBlur = 0;
   }
 }
@@ -2069,8 +2093,9 @@ function handleNetMessage(msg){
   }
 }
 
-/* The server sends each snake's real body once, the first time this page hears of that snake. Without it a snake already on
-   the map shows only the stub it has crawled since you joined: the rest of its body is invisible, but still deadly. */
+/* The server sends each snake's real body once, the first time this page hears of that snake, together with what never
+   changes about it (name, skin, colour). Without the body a snake already on the map shows only the stub it has crawled
+   since you joined: the rest of its body is invisible, but still deadly. */
 const pendingBodies = new Map();
 function bodyToRaw(head, pts){
   const raw = [{ x: head.x, y: head.y }];
@@ -2080,43 +2105,55 @@ function bodyToRaw(head, pts){
 function applyBody(msg){
   if(!msg || typeof msg.id !== 'string' || !Array.isArray(msg.pts)) return;
   const rs = netSnakes.get(msg.id);
-  if(rs) rs.raw = bodyToRaw(rs.head, msg.pts); else pendingBodies.set(msg.id, msg.pts);
+  if(rs){ rs.raw = bodyToRaw(rs.head, msg.pts); if(typeof msg.name === 'string') rs.name = msg.name; }
+  else pendingBodies.set(msg.id, msg);
 }
 
+/* A snapshot: msg.s is one short row per snake [id, x, y, angle, length, flags, cashOutPercent?] (flags: 1 boosting, 2 protected);
+   msg.o, when present, is every orb near you as a flat list [x, y, value, ...]. The server sends orbs less often than snakes, so
+   when msg.o is missing the orbs from the last one stay. */
 function applySnapshot(msg){
-  netOrbs = (msg.orbs || []).map(o => ({ x:o.x, y:o.y, value:o.v, phase:(o.x*0.13+o.y*0.07) % (Math.PI*2) }));
+  if(Array.isArray(msg.o)){
+    const o = msg.o, list = new Array(Math.floor(o.length / 3));
+    for(let i = 0, k = 0; i + 2 < o.length; i += 3, k++) list[k] = { x:o[i], y:o[i+1], value:o[i+2], phase:(o[i]*0.13+o[i+1]*0.07) % (Math.PI*2) };
+    netOrbs = list;
+  }
   const snapAt = performance.now();
   const seen = new Set();
-  for(const s of (msg.snakes || [])){
-    seen.add(s.id);
-    let rs = netSnakes.get(s.id);
+  for(const row of (msg.s || [])){
+    const id = row[0], x = row[1], y = row[2], angle = row[3], length = row[4], flags = row[5] | 0;
+    const boosting = !!(flags & 1), prot = !!(flags & 2), co = row[6] || 0;
+    seen.add(id);
+    let rs = netSnakes.get(id);
     if(!rs){
-      const skin = SKINS[s.skinIndex] || SKINS[0];
+      const info = pendingBodies.get(id) || {};
+      const skinIndex = Number.isInteger(info.skinIndex) ? info.skinIndex : 0;
+      const skin = SKINS[skinIndex] || SKINS[0];
       rs = {
-        id: s.id, name: s.name, isPlayer: s.isPlayer, alive: true,
-        skinIndex: s.skinIndex, colors: skin.colors, glow: skin.glow,
-        head: { x: s.x, y: s.y }, angle: s.angle, targetAngle: s.angle,
-        points: [{ x: s.x, y: s.y }], distSincePoint: 0,
-        raw: pendingBodies.has(s.id) ? bodyToRaw({ x: s.x, y: s.y }, pendingBodies.get(s.id)) : [{ x: s.x, y: s.y }],
-        length: s.length, buyin: s.length / CFG.LEN_PER_DOLLAR, coinsEaten: 0,
-        boosting: s.boosting, bestRank: 999, colorSeed: s.colorSeed,
-        netX: s.x, netY: s.y, netAngle: s.angle, snapAt, speed: CFG.NORMAL_SPEED,
+        id, name: info.name || '', isPlayer: !!info.isPlayer, alive: true,
+        skinIndex, colors: skin.colors, glow: skin.glow,
+        head: { x, y }, angle, targetAngle: angle,
+        points: [{ x, y }], distSincePoint: 0,
+        raw: info.pts ? bodyToRaw({ x, y }, info.pts) : [{ x, y }],
+        length, buyin: length / CFG.LEN_PER_DOLLAR, coinsEaten: 0,
+        boosting, bestRank: 999, colorSeed: info.colorSeed || 0,
+        netX: x, netY: y, netAngle: angle, snapAt, speed: CFG.NORMAL_SPEED, co: 0,
       };
-      netSnakes.set(s.id, rs);
-      pendingBodies.delete(s.id);
+      netSnakes.set(id, rs);
+      pendingBodies.delete(id);
     }
-    rs.netX = s.x; rs.netY = s.y; rs.netAngle = s.angle;
-    rs.snapAt = snapAt; rs.speed = CFG.NORMAL_SPEED * (s.boosting ? CFG.BOOST_MULT : 1);
-    rs.length = s.length; rs.boosting = s.boosting; rs.name = s.name;
-    rs.prot = !!s.prot; // spawn protection: shown as a pulsing shield
-    if(s.id === netYouId){
+    rs.netX = x; rs.netY = y; rs.netAngle = angle;
+    rs.snapAt = snapAt; rs.speed = CFG.NORMAL_SPEED * (boosting ? CFG.BOOST_MULT : 1);
+    rs.length = length; rs.boosting = boosting;
+    rs.prot = prot; // spawn protection: shown as a pulsing shield
+    rs.co = co;     // 0-100: how far through holding to cash out; drawn as a ring around the head for everyone to see
+    if(id === netYouId){
       // your own sounds: eating (your length went up), and spawn protection running out
-      if(mySfx.len !== null){ const gain = s.length - mySfx.len; if(gain > 7) sfx.play('orbBig'); else if(gain > 0.6) sfx.play('orb'); }
-      if(mySfx.prot && !s.prot) sfx.play('protectEnd');
-      mySfx.len = s.length; mySfx.prot = !!s.prot;
+      if(mySfx.len !== null){ const gain = length - mySfx.len; if(gain > 7) sfx.play('orbBig'); else if(gain > 0.6) sfx.play('orb'); }
+      if(mySfx.prot && !prot) sfx.play('protectEnd');
+      mySfx.len = length; mySfx.prot = prot;
     }
-  }
-  for(const id of Array.from(netSnakes.keys())){
+  }  for(const id of Array.from(netSnakes.keys())){
     if(!seen.has(id)) netSnakes.delete(id);
   }
 }
@@ -2292,7 +2329,7 @@ function handleNetDeath(msg){
   }
   // Everyone else is placed where the server had them in the tick of the hit (the last update plus one tick) and then held,
   // so what you see touching on the fade is exactly what touched. (Otherwise the snake you hit carries on and slides over you.)
-  netInterpolate(0.001, 1 / (CFG.TICK_RATE || 30));
+  netInterpolate(0.001, Number.isFinite(msg.ahead) ? msg.ahead : 1 / (CFG.TICK_RATE || 30));
   worldFrozen = true;
   pendingDeath = msg;
   deathOutro.active = true;

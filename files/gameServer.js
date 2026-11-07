@@ -32,6 +32,7 @@ const CFG = {
   // so anything below $1 would start (and cash out) worth more than was paid in.
   MIN_BUYIN: 1,
   MAX_BUYIN: 500,
+  SPAWN_CLEAR: 1000,   // a new snake looks for a start at least this far from every other snake (the best found is used if none is)
   NORMAL_SPEED: 145,
   BOOST_MULT: 1.9,
   TURN_RATE_BASE: 5.6,
@@ -102,6 +103,8 @@ class GameWorld {
     this.orbs = [];
     this.grid = new Map();
     this.elapsed = 0;
+    this.tickCount = 0;     // ticks run so far (the server sends an update every second tick)
+    this.lastSnapTick = 0;  // the tick of the last update sent to players
     this.events = []; // { type, targetId, data } — drained by the server layer each tick
     // Options that only the local demo uses: a smaller arena, food that appears from nowhere, bigger bots.
     this.radius = (opts && opts.radius) || CFG.WORLD_RADIUS;
@@ -151,14 +154,10 @@ class GameWorld {
   }
 
   _makeSnake({ id, name, isPlayer, skinIndex, startLen }) {
-    // A spot clear of every other snake's body (so you never spawn inside someone), from a few tries at random places.
-    let a = 0, r = 0;
-    for (let tries = 0; tries < 40; tries++) {
-      a = rand(0, Math.PI * 2);
-      r = Math.sqrt(Math.random()) * (this.radius * (isPlayer ? 0.5 : 0.75));
-      if (this._hitAt({ id: null }, Math.cos(a) * r, Math.sin(a) * r, 24) === null) break;
-    }
-    const ang = rand(0, Math.PI * 2);
+    // As far from every other snake as a few dozen tries can find, so a new snake never starts near anyone.
+    const spot = this._pickSpawn(isPlayer);
+    const a = Math.atan2(spot.y, spot.x), r = Math.hypot(spot.x, spot.y);
+    const ang = Math.atan2(-spot.y, -spot.x) + rand(-0.9, 0.9); // roughly towards the middle, away from the wall
     return {
       id, name, isPlayer, alive: true, bornAt: this.elapsed,
       protectedUntil: isPlayer ? this.elapsed + CFG.SPAWN_PROTECT_SEC : 0,
@@ -177,6 +176,31 @@ class GameWorld {
       bestRank: 999,
       ai: { wanderTimer: rand(0.5, 2), targetOrb: null },
     };
+  }
+
+  /**
+   * A starting spot far from everybody else. A few dozen random spots are tried and the one with the most room around
+   * it (distance to the nearest head or body of any snake) wins; the search stops early once a spot has CFG.SPAWN_CLEAR.
+   */
+  _pickSpawn(isPlayer) {
+    const R = this.radius * (isPlayer ? 0.8 : 0.75);
+    const pts = [];
+    for (const s of this.snakes.values()) {
+      if (!s.alive) continue;
+      pts.push(s.head.x, s.head.y);
+      for (let i = 0; i < s.points.length; i += 6) pts.push(s.points[i].x, s.points[i].y);
+    }
+    let best = null, bestD = -1;
+    for (let k = 0; k < 150; k++) {
+      const a = rand(0, Math.PI * 2), r = Math.sqrt(Math.random()) * R;
+      const x = Math.cos(a) * r, y = Math.sin(a) * r;
+      let d = Infinity;
+      for (let j = 0; j < pts.length; j += 2) { const dd = dist2(x, y, pts[j], pts[j + 1]); if (dd < d) { d = dd; if (d < bestD * bestD) break; } }
+      const dist = Math.sqrt(d);
+      if (dist > bestD) { bestD = dist; best = { x, y }; }
+      if (bestD >= CFG.SPAWN_CLEAR) break;
+    }
+    return best;
   }
 
   _spawnBot() {
@@ -206,6 +230,14 @@ class GameWorld {
   }
 
   _isProtected(s) { return s.protectedUntil > this.elapsed; }
+
+  /** How far through the hold-to-cash-out a snake is, 0 to 100 (0 when it is not holding). Everyone sees this as a ring around the head. */
+  cashoutPercent(s) {
+    if (s.cashoutHold === undefined || s.cashoutHold === null || !(s.cashoutHold > 0)) return 0;
+    return Math.max(1, Math.min(100, Math.round(100 * s.cashoutHold / CFG.CASHOUT_HOLD_SEC)));
+  }
+
+  playerCount() { let n = 0; for (const s of this.snakes.values()) if (s.isPlayer) n++; return n; }
 
   /** Starts (or refreshes) the hold-to-cash-out. The payout happens in tick() once the hold has lasted long enough. */
   startCashout(id) {
@@ -496,6 +528,7 @@ class GameWorld {
 
   tick(dt) {
     this.elapsed += dt;
+    this.tickCount++;
     if (this.pendingRadius && !this._hasPlayers()) { // a new arena size, applied between games
       this.radius = this.pendingRadius; this.pendingRadius = 0; this.orbs.length = 0; this.setBots(this.botCount, this.botScale);
     }
@@ -574,9 +607,45 @@ class GameWorld {
         isPlayer: s.isPlayer,
       };
       if (this._isProtected(s)) entry.prot = 1; // only present while protected, to keep snapshots small
+      const co = this.cashoutPercent(s); if (co) entry.co = co;
       snakes.push(entry);
     }
     return snakes;
+  }
+
+  /**
+   * The same snakes as snapshotSnakes, as short rows for the network: [id, x, y, angle, length, flags, cashOutPercent?].
+   * flags: 1 = boosting, 2 = spawn-protected. The things that never change (name, skin, colour seed) are sent once, not here.
+   */
+  snapshotRows() {
+    const rows = [];
+    for (const s of this.snakes.values()) {
+      if (!s.alive) continue;
+      const row = [s.id, round1(s.head.x), round1(s.head.y), round3(s.angle), round1(s.length), (s.boosting ? 1 : 0) | (this._isProtected(s) ? 2 : 0)];
+      const co = this.cashoutPercent(s); if (co) row.push(co);
+      rows.push(row);
+    }
+    return rows;
+  }
+
+  /** What never changes about a snake, sent to a player once (together with its body) the first time they see it. */
+  staticOf(id) {
+    const s = this.snakes.get(id);
+    return s ? { name: s.name, skinIndex: s.skinIndex, colorSeed: round1(s.colorSeed), isPlayer: s.isPlayer } : null;
+  }
+
+  /** The orbs near a point as one flat list [x, y, value, x, y, value, ...] (whole-number positions): about a third of the size of objects. */
+  orbsNearFlat(x, y, radius) {
+    const out = [], C = CFG.ORB_CELL, r2 = radius * radius;
+    const x0 = Math.floor((x - radius) / C), x1 = Math.floor((x + radius) / C), y0 = Math.floor((y - radius) / C), y1 = Math.floor((y + radius) / C);
+    for (let gx = x0; gx <= x1; gx++) {
+      for (let gy = y0; gy <= y1; gy++) {
+        const arr = this.orbGrid.get(gx + ',' + gy);
+        if (!arr) continue;
+        for (const o of arr) if (!o.eaten && dist2(x, y, o.x, o.y) <= r2) out.push(Math.round(o.x), Math.round(o.y), Math.round(o.value * 100) / 100);
+      }
+    }
+    return out;
   }
 
   /** The orbs within `radius` of a point, for one player's snapshot (the rest are too far to see). */

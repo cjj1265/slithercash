@@ -78,7 +78,7 @@ async function ready(port) { for (let i = 0; i < 60; i++) { const r = await requ
   const skin = await new Promise((resolve) => {
     const ws = new WebSocket('ws://127.0.0.1:8931'); let id = null; const t = setTimeout(() => resolve(null), 6000);
     ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name: 'demo', buyin: 5, skinIndex: 8 }));
-    ws.onmessage = (ev) => { const m = JSON.parse(ev.data); if (m.t === 'welcome') id = m.id; if (m.t === 'snapshot' && id) { const me = m.snakes.find((s) => s.id === id); if (me) { clearTimeout(t); ws.close(); resolve(me.skinIndex); } } };
+    ws.onmessage = (ev) => { const m = JSON.parse(ev.data); if (m.t === 'welcome') id = m.id; if (m.t === 'body' && id && m.id === id) { clearTimeout(t); ws.close(); resolve(m.skinIndex); } };
   });
   check('any skin can be used in the demo (no wallet needed)', skin === 8, skin);
   const lan = Object.values(os.networkInterfaces()).flat().find((i) => i && i.family === 'IPv4' && !i.internal);
